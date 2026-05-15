@@ -6,10 +6,15 @@
 
 [![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
+[![Latest Release](https://img.shields.io/github/v/release/basionwang-bot/HermesPet?label=latest&color=success&logo=github)](https://github.com/basionwang-bot/HermesPet/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/basionwang-bot/HermesPet/total?label=downloads&color=blue)](https://github.com/basionwang-bot/HermesPet/releases)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/basionwang-bot/HermesPet/pulls)
 
 🌍 [中文](./README.md) · **English**
+
+### 📦 [Download the latest DMG →](https://github.com/basionwang-bot/HermesPet/releases/latest)
+
+Grab the macOS DMG · double-click to install · pick a provider, paste an API key — **no command-line tools required**
 
 </div>
 
