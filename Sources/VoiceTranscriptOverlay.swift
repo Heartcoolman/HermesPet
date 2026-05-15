@@ -56,6 +56,8 @@ final class VoiceTranscriptOverlayController {
         if window == nil { createWindow() }
         viewState.text = initialText
         viewState.isVisible = true
+        lastWidthBucket = -1   // 新一轮录音重置节流状态
+        lastPositionAt = 0
         positionWindow()
         window?.orderFront(nil)
     }
@@ -72,10 +74,28 @@ final class VoiceTranscriptOverlayController {
     }
 
     private func updateText(_ text: String) {
-        viewState.text = text.isEmpty ? "正在听…" : text
-        // 文字宽度变化时重新调整窗口位置和宽度
-        positionWindow()
+        let newText = text.isEmpty ? "正在听…" : text
+        // SwiftUI 文本节点 diff —— 仅在内容确实变化时赋值，
+        // 避免相同字符串触发无意义的 @Observable 通知
+        if viewState.text != newText {
+            viewState.text = newText
+        }
+        // **不要每次 partial 都 setFrame** —— SFSpeechRecognizer 一秒能发 20-30 次 partial，
+        // 每次都同步 setFrame + display:true 会把主线程钉在 NSWindow.setFrameCommon /
+        // SwiftUI flushTransactions，issue #3 "语音唤醒高占用"就是这条路径。
+        // 改成按宽度等级（约每多 4 个字才扩一次窗口）+ 节流到 ≥120ms 一次。
+        let widthBucket = (text.count + 3) / 4
+        let now = CFAbsoluteTimeGetCurrent()
+        if widthBucket != lastWidthBucket && now - lastPositionAt >= 0.12 {
+            lastWidthBucket = widthBucket
+            lastPositionAt = now
+            positionWindow()
+        }
     }
+
+    /// 用于 updateText 节流：上次定位时的宽度等级 / 时间戳
+    private var lastWidthBucket: Int = -1
+    private var lastPositionAt: CFAbsoluteTime = 0
 
     // MARK: - Window
 
@@ -177,6 +197,8 @@ struct VoiceTranscriptView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 0)
         .animation(AnimTok.smooth, value: state.isVisible)
-        .animation(AnimTok.snappy, value: state.text)
+        // **不要 animate value: state.text** —— text 一秒变 20+ 次，每次都启一段动画
+        // 会堆叠成永远跑不完的 transition 队列，主线程被 SwiftUI flushTransactions 钉住。
+        // 文字节点本身换内容时让 SwiftUI 做 crossfade 默认就足够柔和。
     }
 }
