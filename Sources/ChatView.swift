@@ -73,8 +73,12 @@ struct ChatView: View {
         } message: {
             Text("这条对话的所有消息会被清掉，无法恢复。其他对话不受影响。")
         }
-        // 不固定 frame，跟随 NSWindow 自适应。设最小尺寸保证不会被拖太小
-        .frame(minWidth: 360, minHeight: 360)
+        // 不固定 frame，跟随 NSWindow 自适应。
+        // ⚠️ 决策 #7：**不要写 minWidth/minHeight** —— ChatWindowController.hide() 把窗口缩到
+        // 100×30 时，SwiftUI 的最小尺寸要求会反向请求 window 改 frame，触发 NSHostingView
+        // 嵌套 layout cycle，macOS 26 直接抛 NSException 必崩（issue #3 的 .ips 就是这个）。
+        // 最小尺寸由 NSWindow.contentMinSize 在动画外控制（ChatWindowController init 里设 360×360）。
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 整体填一层磨砂材质背景 —— 否则窗口（透明 NSWindow）中部会漏出桌面
         .background(.ultraThinMaterial)
         // 圆角浮窗：clipShape + window.hasShadow=true 让阴影也跟着圆角走

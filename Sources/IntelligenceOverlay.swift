@@ -100,32 +100,27 @@ struct IntelligenceGlowView: View {
     }
 }
 
-/// 实际的光环渲染 —— Apple Intelligence 风格的"液态玻璃"连续彩虹光环（v3 增强版）。
+/// 实际的光环渲染 —— Apple Intelligence 风格的"液态玻璃"连续彩虹光环。
 ///
-/// 关键思路：**保留连续的环**，不要让任何东西把环切成离散的色块。
-/// 通过下面 5 个手段叠加出"液态玻璃 / 颠颠果冻"的感觉：
-///
-///   1. **4 层反方向旋转的彩虹环叠加** → 颜色在环上像漩涡一样搅动
-///      - 外层柔光（特大模糊）顺时针 4.5s
-///      - 中层主体（中模糊）逆时针 6.5s + .plusLighter 融合
-///      - 内层高光（细描边）顺时针 2.8s
-///      - **新增 内反光层**（极细 + .overlay）模拟玻璃内表面反射
-///   2. **多频率呼吸**（周期更短，颠颠感更明显）
-///      - lineWidth 范围更大：24~52pt（外）、12~26pt（中）、4~10pt（内）
-///      - 整体 scale 1.0 ↔ 1.022（更明显的呼吸感）
-///      - saturation 0.85 ↔ 1.15
-///   3. **形状本身在液动**：cornerRadius 18~22pt 呼吸，让矩形圆角"涌动"
-///   4. **角度速度 cos 调制** → 旋转忽快忽慢，不是匀速，更像液体被搅动
-///   5. **hueRotation 微变** ±12° → 颜色相对位置在缓慢漂移，"莹润流动"感
-///
-///   全部 TimelineView(.animation) 驱动，60Hz+ 持续刷新
+/// **性能注意（issue #3 教训）**：之前用 `TimelineView(.animation)` + 4 层 AngularGradient +
+/// 36-52pt 高斯模糊 + `.compositingGroup()` 全屏渲染，每帧让 GPU/CPU 重算整套合成，60Hz 屏
+/// 主线程被 GraphHost.flushTransactions 钉死（sample 显示 1273/1273 都在 SwiftUI 布局，
+/// 物理内存峰值 2.6 GB）。现在的版本：
+///   - **TimelineView 改为固定 30Hz**（`.periodic(from: .now, by: 1/30)`）—— 视觉差异不大但
+///     CPU/GPU 工作量直接减半
+///   - **从 4 层降到 3 层**（删除最贵的"内反光"`.overlay` 层）
+///   - **外层柔光 blur 从 36~52pt 收到 18~24pt** —— 大尺寸高斯模糊是 SwiftUI 渲染中最贵的
+///     一类操作，半径减半 → 着色器 cost 减少约 4 倍
+///   - **scaleEffect / compositingGroup 保留** —— 这俩本身不贵，能保住质感
 private struct AnimatedGlow: View {
 
     private var colors: [Color] { IntelligenceGlowView.appleAIColors }
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation) { context in
+            // 30Hz 已足够呈现"液态玻璃"呼吸感（眼睛对边缘光晕的时间分辨率远低于硬边动画），
+            // 且 sample 显示之前 60Hz 的 TimelineView 是高占用主因之一。
+            TimelineView(.periodic(from: .now, by: 1.0 / 30.0)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
 
                 // 三个错相的呼吸函数（0~1）—— 用于驱动各层呼吸
@@ -133,11 +128,10 @@ private struct AnimatedGlow: View {
                 let breathAlt = (sin(t * 2 * .pi / 2.6 + 1.3) + 1) / 2        // 2.6s 错相
                 let breathSlow = (sin(t * 2 * .pi / 5.0 + 0.7) + 1) / 2       // 5.0s 慢呼吸（驱动 hue / cornerRadius）
 
-                // ── 各层 lineWidth 呼吸 —— 厚度脉动范围更大，颠颠更明显
-                let outerWidth: CGFloat = 24 + 28 * CGFloat(breath)           // 24~52（原 30~44）
+                // ── 各层 lineWidth 呼吸 —— 厚度脉动
+                let outerWidth: CGFloat = 24 + 28 * CGFloat(breath)           // 24~52
                 let midWidth:   CGFloat = 12 + 14 * CGFloat(breathAlt)        // 12~26
                 let innerWidth: CGFloat = 4  + 6  * CGFloat(breath)           // 4~10
-                let reflectWidth: CGFloat = 2 + 2 * CGFloat(breathAlt)        // 2~4 极细内反光
 
                 // ── 形状本身呼吸：圆角脉动让矩形涌动
                 let outerCorner: CGFloat = 18 + 6 * CGFloat(breathSlow)       // 18~24
@@ -145,11 +139,9 @@ private struct AnimatedGlow: View {
                 let innerCorner: CGFloat = 14 + 4 * CGFloat(breathAlt)        // 14~18
 
                 // ── 角度速度 cos 调制 —— 旋转忽快忽慢
-                // 基础角度 + cos 项让瞬时角速度在 0.7x ~ 1.3x 间波动
                 let outerAngle = t * 360 / 4.5 + 25 * sin(t * 2 * .pi / 3.2)
                 let midAngle   = -t * 360 / 6.5 + 90 + 30 * sin(t * 2 * .pi / 2.8 + 1.0)
                 let innerAngle = t * 360 / 2.8 + 200 + 18 * sin(t * 2 * .pi / 2.1)
-                let reflectAngle = -t * 360 / 9.0 + 45
 
                 // ── 整体呼吸
                 let saturation: Double = 0.85 + 0.30 * breathAlt              // 0.85~1.15
@@ -157,7 +149,9 @@ private struct AnimatedGlow: View {
                 let hueShift = Angle.degrees(12 * (breathSlow - 0.5) * 2)     // ±12° 颜色漂移
 
                 ZStack {
-                    // ── 层 1：外层柔光（大模糊氛围底）—— 顺时针 4.5s 一圈
+                    // ── 层 1：外层柔光（氛围底）—— 顺时针 4.5s 一圈
+                    // blur 半径减半（18~24pt，原 36~52pt）—— 全屏大半径高斯模糊是
+                    // SwiftUI 渲染最贵的操作之一，halve 半径 ≈ shader cost / 4
                     AngularGradient(
                         gradient: Gradient(colors: colors),
                         center: .center,
@@ -166,12 +160,11 @@ private struct AnimatedGlow: View {
                     .mask(
                         RoundedRectangle(cornerRadius: outerCorner, style: .continuous)
                             .stroke(lineWidth: outerWidth)
-                            .blur(radius: 36 + 16 * CGFloat(breathAlt))       // 36~52pt 模糊
+                            .blur(radius: 18 + 6 * CGFloat(breathAlt))
                     )
                     .opacity(1.0)
 
                     // ── 层 2：中层主体（颜色搅动核心）—— 逆时针 6.5s 一圈
-                    // 反方向 + 不同速度让颜色像漩涡里融合，而不是统一旋转
                     AngularGradient(
                         gradient: Gradient(colors: colors),
                         center: .center,
@@ -180,7 +173,7 @@ private struct AnimatedGlow: View {
                     .mask(
                         RoundedRectangle(cornerRadius: midCorner, style: .continuous)
                             .stroke(lineWidth: midWidth)
-                            .blur(radius: 14 + 6 * CGFloat(breath))           // 14~20pt
+                            .blur(radius: 10 + 4 * CGFloat(breath))
                     )
                     .blendMode(.plusLighter)
                     .opacity(0.92)
@@ -198,21 +191,8 @@ private struct AnimatedGlow: View {
                     )
                     .blendMode(.plusLighter)
                     .opacity(0.95)
-
-                    // ── 层 4：内反光（玻璃内表面反射）—— 极细，逆向慢转
-                    // .overlay 混合模式让它跟下层颜色相互作用，模拟玻璃下的反光
-                    AngularGradient(
-                        gradient: Gradient(colors: colors),
-                        center: .center,
-                        angle: .degrees(reflectAngle)
-                    )
-                    .mask(
-                        RoundedRectangle(cornerRadius: innerCorner - 2, style: .continuous)
-                            .stroke(lineWidth: reflectWidth)
-                            .blur(radius: 1.5)
-                    )
-                    .blendMode(.overlay)
-                    .opacity(0.7)
+                    // 第 4 层"内反光"已删除（issue #3 优化）—— 多一层
+                    // .overlay blend 全屏合成约 +20% 帧时，但视觉收益微弱
                 }
                 .frame(width: geo.size.width, height: geo.size.height)
                 .hueRotation(hueShift)                                        // 颜色微漂移
