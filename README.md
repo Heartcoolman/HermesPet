@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/banner.png" alt="HermesPet — 你的 AI 桌面伙伴，陪你工作，懂你所想" width="100%" />
+
 # HermesPet 🐰
 
 **让 AI 住在你 MacBook 的刘海里 · 零依赖开箱即用 · 多引擎并行的桌面 AI 伴侣**

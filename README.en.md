@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/banner.png" alt="HermesPet — Your AI desktop companion that lives under your MacBook's notch" width="100%" />
+
 # HermesPet 🐰
 
 **An AI chat client that lives under your MacBook's notch · Zero-dependency setup · Multi-engine parallel desktop AI companion**
