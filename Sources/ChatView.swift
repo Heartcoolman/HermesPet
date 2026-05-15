@@ -184,6 +184,11 @@ struct ChatView: View {
                 }
             }
 
+            HeaderIconButton(systemName: "pin", help: "导出全部 Pin 为 Markdown") {
+                PinCardController.shared.exportAllPinsToMarkdown()
+            }
+            .disabled(PinStore.shared.pins.isEmpty)
+
             HeaderIconButton(systemName: "gearshape.fill", help: "设置") {
                 viewModel.showSettings.toggle()
             }
@@ -306,6 +311,7 @@ struct ChatView: View {
                                 MessageBubbleView(
                                     message: message,
                                     agentMode: viewModel.agentMode,
+                                    conversationID: viewModel.activeConversationID,
                                     onRetry: { viewModel.retryLastMessage() },
                                     onChoiceSelected: { choice in
                                         viewModel.submitVoiceInput(choice)
@@ -376,6 +382,13 @@ struct ChatView: View {
                 .onChange(of: viewModel.messages.last?.content.count) { _, _ in
                     if viewModel.messages.last?.isStreaming == true, isMessagesNearBottom {
                         scrollToBottom(proxy)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetScrollToMessage"))) { note in
+                    if let msgID = note.userInfo?["messageID"] as? String {
+                        withAnimation(AnimTok.smooth) {
+                            proxy.scrollTo(msgID, anchor: .center)
+                        }
                     }
                 }
             }

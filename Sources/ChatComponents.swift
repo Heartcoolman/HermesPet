@@ -8,6 +8,8 @@ struct MessageBubbleView: View {
     let message: ChatMessage
     /// 当前对话对象，用来决定 assistant 头像和角色名
     var agentMode: AgentMode = .hermes
+    /// 所属对话 ID，pin 时记录来源以便点击卡片跳回原消息
+    var conversationID: String? = nil
     /// 出错消息底部"重试"按钮的回调（仅 isError 时显示）
     var onRetry: (() -> Void)? = nil
     /// AI 给出编号选项时，点击卡片回调（把那项内容作为新消息发送）
@@ -20,6 +22,7 @@ struct MessageBubbleView: View {
     @State private var isHovering = false
     @State private var didCopy = false
     @State private var didPin = false
+    @State private var pinShake = false
 
     private var isUser: Bool { message.role == .user }
     /// assistant 内容以 "❌" 开头 → 出错消息，可重试
@@ -281,12 +284,14 @@ struct MessageBubbleView: View {
                     Button(action: pinContent) {
                         Image(systemName: didPin ? "pin.fill" : "pin")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(didPin ? Color.orange : .secondary)
+                            .foregroundStyle(didPin ? Color.orange : pinShake ? Color.red : .secondary)
                             .frame(width: 20, height: 20)
                             .background(Circle().fill(.ultraThinMaterial))
                             .overlay(Circle().stroke(.primary.opacity(0.08), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
+                    .offset(x: pinShake ? 4 : 0)
+                    .animation(pinShake ? .default.repeatCount(4, autoreverses: true).speed(8) : .default, value: pinShake)
                     .help(didPin ? "已 Pin 到桌面" : "Pin 到桌面")
                 }
             }
@@ -299,10 +304,22 @@ struct MessageBubbleView: View {
 
     /// 把这条 assistant 消息 pin 到桌面右上角。已达 8 张上限时 didPin 短暂变红提示
     private func pinContent() {
-        let success = PinCardController.pin(content: message.content, mode: agentMode)
-        didPin = success
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_400_000_000)
+        let result = PinCardController.pin(content: message.content, mode: agentMode, conversationID: conversationID, messageID: message.id)
+        switch result {
+        case .added:
+            didPin = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_400_000_000)
+                didPin = false
+            }
+        case .duplicate:
+            Haptic.tap(.levelChange)
+            pinShake = true
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                pinShake = false
+            }
+        case .full:
             didPin = false
         }
     }

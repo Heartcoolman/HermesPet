@@ -592,37 +592,57 @@ final class ChatViewModel {
         NotificationCenter.default.post(name: .init("HermesPetOpenChatRequested"), object: nil)
     }
 
-    /// 把桌面 Pin 转成一个新对话（用户双击 pin 卡片时调用）。
-    /// 新对话用 pin 内容作为 assistant 回答开局，自动绑定到对应 mode 并打开聊天窗
-    func openPinAsConversation(content: String, title: String, mode: AgentMode) {
+    /// 点击桌面 Pin 卡片时调用。
+    /// 优先跳回原对话并滚动到原消息；原对话已关闭或来源不明时才新建对话。
+    func openPinAsConversation(pin: PinCard) {
+        // 优先：原对话还在，直接切过去
+        if let srcConvID = pin.sourceConversationID,
+           conversations.contains(where: { $0.id == srcConvID }) {
+            activeConversationID = srcConvID
+            if let mode = conversations.first(where: { $0.id == srcConvID })?.mode {
+                if lastUsedMode != mode { lastUsedMode = mode }
+                NotificationCenter.default.post(
+                    name: .init("HermesPetModeChanged"),
+                    object: nil,
+                    userInfo: ["mode": mode.rawValue]
+                )
+            }
+            // 通知 ScrollView 滚动到原消息
+            if let msgID = pin.sourceMessageID {
+                NotificationCenter.default.post(
+                    name: .init("HermesPetScrollToMessage"),
+                    object: nil,
+                    userInfo: ["messageID": msgID]
+                )
+            }
+            NotificationCenter.default.post(name: .init("HermesPetOpenChatRequested"), object: nil)
+            return
+        }
+        // 兜底：原对话不在了，新建
         if conversations.count >= kMaxConversations {
             errorMessage = "对话已达 \(kMaxConversations) 个上限，请先关一个再转入"
             return
         }
-        let safeTitle = title.isEmpty ? "Pin" : String(title.prefix(20))
+        let safeTitle = pin.title.isEmpty ? "Pin" : String(pin.title.prefix(20))
         let newConv = Conversation(
             title: safeTitle,
             messages: [
                 ChatMessage(role: .user, content: "📌 来自桌面 Pin 的内容："),
-                ChatMessage(role: .assistant, content: content)
+                ChatMessage(role: .assistant, content: pin.content)
             ],
-            mode: mode
+            mode: pin.mode
         )
         conversations.insert(newConv, at: 0)
         activeConversationID = newConv.id
-        if lastUsedMode != mode { lastUsedMode = mode }
+        if lastUsedMode != pin.mode { lastUsedMode = pin.mode }
         storage.saveConversations(conversations)
         NotificationCenter.default.post(
             name: .init("HermesPetModeChanged"),
             object: nil,
-            userInfo: ["mode": mode.rawValue]
+            userInfo: ["mode": pin.mode.rawValue]
         )
         checkConnection()
-        // 通知 AppDelegate 把聊天窗调出来
-        NotificationCenter.default.post(
-            name: .init("HermesPetOpenChatRequested"),
-            object: nil
-        )
+        NotificationCenter.default.post(name: .init("HermesPetOpenChatRequested"), object: nil)
     }
 
     /// 把快问结果迁移到一个新对话（用户在快问浮窗按 💬 转聊天窗时调用）。

@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 桌面 Pin 卡片 —— 启动时恢复已持久化的 pin 到屏幕右上角
         // 双击 pin → 转新对话（注入 ChatViewModel 入口）
         PinCardController.shared.onOpenInChat = { [weak vm] pin in
-            vm?.openPinAsConversation(content: pin.content, title: pin.title, mode: pin.mode)
+            vm?.openPinAsConversation(pin: pin)
         }
         PinCardController.shared.bootstrap()
 
@@ -230,6 +230,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         briefingItem.target = self
         menu.addItem(briefingItem)
 
+        let exportPinsItem = NSMenuItem(title: "📌 导出全部 Pin 为 Markdown", action: #selector(menuExportPins), keyEquivalent: "")
+        exportPinsItem.target = self
+        exportPinsItem.isEnabled = !PinStore.shared.pins.isEmpty
+        menu.addItem(exportPinsItem)
+
         menu.addItem(.separator())
 
         let quitItem = NSMenuItem(title: "退出 Hermes 桌宠", action: #selector(quitApp), keyEquivalent: "q")
@@ -248,6 +253,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func menuGenerateBriefing() {
         guard let vm = viewModel else { return }
         MorningBriefingService.shared.generateNow(viewModel: vm)
+    }
+
+    @objc private func menuExportPins() {
+        PinCardController.shared.exportAllPinsToMarkdown()
     }
 
     @objc private func quitApp() {

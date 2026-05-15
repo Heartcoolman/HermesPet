@@ -109,9 +109,9 @@ final class DynamicIslandController {
         }()
         let actualNotchHeight: CGFloat = hasNotch ? safeArea.top : 28
 
-        // window 始终保持 idle 尺寸
+        // window 用 hover 最大尺寸，避免 hover 膨胀超出窗口边界产生残影
         let windowWidth  = actualNotchWidth  + idleExtraWidth
-        let windowHeight = actualNotchHeight + idleDrop
+        let windowHeight = actualNotchHeight + hoverDrop
 
         // 水平：用「刘海真实中心」对齐
         let notchCenterX: CGFloat = {
@@ -564,10 +564,17 @@ struct DynamicIslandPillView: View {
             notificationCard
         } else if let toolKind = currentToolKind {
             toolStateCard(toolKind)
-        } else if isHovering {
-            hoverCard
         } else {
-            idleStateRow
+            ZStack {
+                if isHovering {
+                    hoverCard
+                        .transition(.opacity.combined(with: .scale(scale: 0.94)))
+                } else {
+                    idleStateRow
+                        .transition(.opacity)
+                }
+            }
+            .animation(AnimTok.snappy, value: isHovering)
         }
     }
 

@@ -37,12 +37,16 @@ struct PinCard: Identifiable, Codable, Equatable {
     /// 任务是否标记为完成（仅 isTask=true 时生效）。勾了**不会自渐隐**，
     /// 标题加删除线 + 灰阶留在桌面，用户手动关闭。让用户有"今天做完了 N 件"的成就感
     var isDone: Bool
+    /// 来源对话 ID（从聊天气泡 pin 时记录，点击卡片时优先跳回原对话）
+    var sourceConversationID: String?
+    /// 来源消息 ID（用于滚动定位到原消息）
+    var sourceMessageID: String?
 
     var mode: AgentMode { AgentMode(rawValue: modeRawValue) ?? .hermes }
     var hasCustomPosition: Bool { customX != nil && customY != nil }
 
     /// 普通 Pin 构造：从聊天回答 / Pin 按钮触发
-    init(content: String, mode: AgentMode) {
+    init(content: String, mode: AgentMode, sourceConversationID: String? = nil, sourceMessageID: String? = nil) {
         self.id = UUID().uuidString
         self.title = Self.makeTitle(from: content)
         self.content = content
@@ -52,13 +56,14 @@ struct PinCard: Identifiable, Codable, Equatable {
         self.customY = nil
         self.isTask = false
         self.isDone = false
+        self.sourceConversationID = sourceConversationID
+        self.sourceMessageID = sourceMessageID
     }
 
     /// 任务 Pin 构造：从 PlannedTask 转过来（AI 分解出来的待办）
     init(task: PlannedTask) {
         self.id = UUID().uuidString
         self.title = String(task.title.prefix(40))
-        // content 用 task 的 title + desc 拼起来，单击转聊天时有完整上下文
         self.content = task.desc.isEmpty ? task.title : "\(task.title)\n\n\(task.desc)"
         self.modeRawValue = task.suggestedMode.rawValue
         self.pinnedAt = Date()
@@ -66,11 +71,14 @@ struct PinCard: Identifiable, Codable, Equatable {
         self.customY = nil
         self.isTask = true
         self.isDone = false
+        self.sourceConversationID = nil
+        self.sourceMessageID = nil
     }
 
     // Codable: 兼容旧版（customX/Y / isTask / isDone 字段缺失时 decode 不抛错）
     private enum CodingKeys: String, CodingKey {
         case id, title, content, modeRawValue, pinnedAt, customX, customY, isTask, isDone
+        case sourceConversationID, sourceMessageID
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -81,9 +89,10 @@ struct PinCard: Identifiable, Codable, Equatable {
         self.pinnedAt = try c.decode(Date.self, forKey: .pinnedAt)
         self.customX = try c.decodeIfPresent(Double.self, forKey: .customX)
         self.customY = try c.decodeIfPresent(Double.self, forKey: .customY)
-        // 旧 JSON 没有 isTask/isDone —— 兜底 false
         self.isTask = (try? c.decode(Bool.self, forKey: .isTask)) ?? false
         self.isDone = (try? c.decode(Bool.self, forKey: .isDone)) ?? false
+        self.sourceConversationID = try c.decodeIfPresent(String.self, forKey: .sourceConversationID)
+        self.sourceMessageID = try c.decodeIfPresent(String.self, forKey: .sourceMessageID)
     }
 
     /// 从 content 抽取标题：取第一行非空、去掉 markdown 前缀符号、最多 40 字
@@ -147,12 +156,15 @@ final class PinStore {
 
     private init() { load() }
 
+    enum AddResult { case added, duplicate, full }
+
     @discardableResult
-    func add(_ pin: PinCard) -> Bool {
-        guard pins.count < Self.maxPins else { return false }
+    func add(_ pin: PinCard) -> AddResult {
+        if pins.contains(where: { $0.content == pin.content }) { return .duplicate }
+        guard pins.count < Self.maxPins else { return .full }
         pins.insert(pin, at: 0)
         save()
-        return true
+        return .added
     }
 
     func remove(id: String) {
@@ -277,25 +289,22 @@ final class PinCardController {
     /// 触发点是 SwiftUI 同步栈（聊天气泡 / 快问的 📌 按钮）；layoutAll 跨窗口
     /// setFrame，异步到下一个 runloop，避免嵌套 layout cycle 引起 SIGABRT
     @discardableResult
-    static func pin(content: String, mode: AgentMode) -> Bool {
-        let pin = PinCard(content: content, mode: mode)
-        guard PinStore.shared.add(pin) else { return false }
-        shared.createWindow(for: pin)
-        DispatchQueue.main.async {
-            shared.layoutAll()
+    static func pin(content: String, mode: AgentMode, conversationID: String? = nil, messageID: String? = nil) -> PinStore.AddResult {
+        let pin = PinCard(content: content, mode: mode, sourceConversationID: conversationID, sourceMessageID: messageID)
+        let result = PinStore.shared.add(pin)
+        if result == .added {
+            shared.createWindow(for: pin)
+            DispatchQueue.main.async { shared.layoutAll() }
         }
-        return true
+        return result
     }
 
-    /// "📌 Pin" 任务卡片到桌面 —— 任务 Pin 入口（区别于普通 Pin：带 checkbox）
     @discardableResult
     static func pinTask(_ task: PlannedTask) -> Bool {
         let pin = PinCard(task: task)
-        guard PinStore.shared.add(pin) else { return false }
+        guard PinStore.shared.add(pin) == .added else { return false }
         shared.createWindow(for: pin)
-        DispatchQueue.main.async {
-            shared.layoutAll()
-        }
+        DispatchQueue.main.async { shared.layoutAll() }
         return true
     }
 
@@ -433,6 +442,38 @@ final class PinCardController {
     private func copy(content: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(content, forType: .string)
+    }
+
+    func exportAllPinsToMarkdown() {
+        let pins = PinStore.shared.pins
+        guard !pins.isEmpty else { return }
+
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "yyyy-MM-dd HH:mm"
+        let stampFmt = DateFormatter()
+        stampFmt.dateFormat = "yyyyMMdd-HHmm"
+
+        var lines: [String] = ["# Pin 导出", "", "> 导出时间：\(dateFmt.string(from: Date()))  共 \(pins.count) 条", "", "---", ""]
+        for pin in pins {
+            lines.append("## \(pin.title)")
+            lines.append("")
+            lines.append("> \(pin.mode.label) · \(dateFmt.string(from: pin.pinnedAt))\(pin.isTask ? " · 任务\(pin.isDone ? "（已完成）" : "")" : "")")
+            lines.append("")
+            lines.append(pin.content)
+            lines.append("")
+            lines.append("---")
+            lines.append("")
+        }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.text]
+        panel.allowsOtherFileTypes = true
+        panel.nameFieldStringValue = "pins-\(stampFmt.string(from: Date())).md"
+        panel.title = "导出全部 Pin 为 Markdown"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 }
 
