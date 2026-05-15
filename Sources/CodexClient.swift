@@ -22,6 +22,8 @@ final class CodexClient: @unchecked Sendable {
 
     private let imagesLock = NSLock()
     private var _pendingImages: [Data] = []
+    private let sessionLock = NSLock()
+    private static let sessionMapKey = "codexSessionIDsByConversationID"
 
     /// stream 完成后由 ViewModel 调用，消费本次生成的图片
     func takeGeneratedImages() -> [Data] {
@@ -40,12 +42,33 @@ final class CodexClient: @unchecked Sendable {
     /// 兼容旧接口（多 mode 共用 ChatViewModel.clearChat 调用）
     func resetSession() {}
 
-    /// 流式问答 —— 把整个对话历史拼成 prompt 一次性传给 Codex；
-    /// 最近一条 user 消息附带的图片通过 `codex exec -i <path>` 输入（Codex CLI 原生支持视觉）
-    func streamCompletion(messages: [ChatMessage]) -> AsyncThrowingStream<String, Error> {
-        let prompt = buildPrompt(messages: messages)
+    /// 清掉某个 HermesPet conversation 绑定的 Codex session。
+    /// 用户清空/关闭对话后，后续再发应该是一个干净的新 Codex 会话。
+    func resetSession(conversationID: String) {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        var map = UserDefaults.standard.dictionary(forKey: Self.sessionMapKey) as? [String: String] ?? [:]
+        map.removeValue(forKey: conversationID)
+        UserDefaults.standard.set(map, forKey: Self.sessionMapKey)
+    }
+
+    /// 流式问答。
+    ///
+    /// Codex CLI 的首次 `exec` 会做 session/bootstrap，通常比较慢；之后同一个 session 用
+    /// `codex exec resume <thread_id>` 会快很多。HermesPet 的每个 Conversation 绑定一个
+    /// Codex thread_id：第一次把完整历史发给 Codex，拿到 `thread.started.thread_id` 后持久化；
+    /// 后续只把最新用户输入发给 `resume`，不再每轮冷启动 + 重传全量历史。
+    func streamCompletion(messages: [ChatMessage],
+                          conversationID: String? = nil) -> AsyncThrowingStream<String, Error> {
+        let existingSessionID = sessionID(for: conversationID)
+        let prompt = buildPrompt(messages: messages, isResume: existingSessionID != nil)
         let inputImages = collectInputImagePaths(from: messages)
-        return streamRaw(prompt: prompt, imageFiles: inputImages)
+        return streamRaw(
+            prompt: prompt,
+            imageFiles: inputImages,
+            conversationID: conversationID,
+            sessionID: existingSessionID
+        )
     }
 
     /// 提取最近一条 user 消息附带的图片路径，写到临时目录后给 codex `-i` 参数用。
@@ -105,12 +128,15 @@ final class CodexClient: @unchecked Sendable {
 
 """
 
-    private func buildPrompt(messages: [ChatMessage]) -> String {
+    private func buildPrompt(messages: [ChatMessage], isResume: Bool) -> String {
         let convo = messages.filter { $0.role == .user || $0.role == .assistant }
         guard let latest = convo.last, latest.role == .user else {
             return convo.map { "\($0.role == .user ? "用户" : "助手"): \($0.content)" }.joined(separator: "\n\n") + Self.clientHints
         }
         let docPaths = latest.documentPaths
+        if isResume {
+            return buildLatestTurnPrompt(latest: latest, docPaths: docPaths)
+        }
         let history = convo.dropLast()
         if history.isEmpty {
             if docPaths.isEmpty { return latest.content + Self.clientHints }
@@ -140,9 +166,23 @@ final class CodexClient: @unchecked Sendable {
         return lines.joined(separator: "\n") + Self.clientHints
     }
 
+    /// resume 模式下 Codex 已经有前文，只发最新一轮用户输入，避免每条消息都像新会话一样重跑。
+    private func buildLatestTurnPrompt(latest: ChatMessage, docPaths: [String]) -> String {
+        guard !docPaths.isEmpty else {
+            return latest.content + Self.clientHints
+        }
+        var p = latest.content
+        p += "\n\n用户附带了以下文档，请用 shell 工具按这些绝对路径读取：\n"
+        for path in docPaths { p += path + "\n" }
+        return p + Self.clientHints
+    }
+
     /// 底层 spawn codex exec --json 的流式实现。
     /// imageFiles：通过 `-i <path>` 传给 codex 让它视觉识别（最后一条 user 消息的附图）
-    private func streamRaw(prompt: String, imageFiles: [String] = []) -> AsyncThrowingStream<String, Error> {
+    private func streamRaw(prompt: String,
+                           imageFiles: [String] = [],
+                           conversationID: String?,
+                           sessionID: String?) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             // spawn 前快照 codex 的默认图片目录
             let codexImageDir = (NSHomeDirectory() as NSString)
@@ -151,12 +191,23 @@ final class CodexClient: @unchecked Sendable {
 
             let process = Process()
             process.executableURL = URL(fileURLWithPath: executablePath)
-            var args: [String] = [
-                "exec",
-                "--json",
-                "--skip-git-repo-check",
-                "--dangerously-bypass-approvals-and-sandbox"
-            ]
+            var args: [String]
+            if let sessionID, !sessionID.isEmpty {
+                args = [
+                    "exec",
+                    "resume",
+                    "--json",
+                    "--skip-git-repo-check",
+                    "--dangerously-bypass-approvals-and-sandbox"
+                ]
+            } else {
+                args = [
+                    "exec",
+                    "--json",
+                    "--skip-git-repo-check",
+                    "--dangerously-bypass-approvals-and-sandbox"
+                ]
+            }
             // 每张输入图加一个 -i <path>，让 codex 视觉识别
             for path in imageFiles {
                 args.append("-i")
@@ -168,16 +219,27 @@ final class CodexClient: @unchecked Sendable {
             if !imageFiles.isEmpty {
                 args.append("--")
             }
+            if let sessionID, !sessionID.isEmpty {
+                args.append(sessionID)
+            }
             args.append(prompt)
             process.arguments = args
             process.currentDirectoryURL = URL(fileURLWithPath: workingDir)
-            // 透传环境变量；codex 自己读 ~/.codex/auth 凭据，不需要额外 env
-            process.environment = ProcessInfo.processInfo.environment
+            process.standardInput = Self.nullInput
+            // 透传环境变量并补齐 GUI App 缺失的 PATH；codex 自己读 ~/.codex/auth 凭据
+            process.environment = CLIProcessEnvironment.make(executablePath: executablePath)
 
             let outPipe = Pipe()
             let errPipe = Pipe()
             process.standardOutput = outPipe
             process.standardError = errPipe
+            let stderrBuffer = CodexLockedData()
+            errPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if !data.isEmpty {
+                    stderrBuffer.append(data)
+                }
+            }
 
             let state = StreamState()
 
@@ -203,7 +265,12 @@ final class CodexClient: @unchecked Sendable {
                     // - item.completed 且 item.type == "agent_message"  → assistant 文本
                     // - item.started / item.completed 且 item.type != "agent_message"  → 工具事件
                     //   （Codex 常见 item.type: command_execution / file_change / web_search ...）
-                    if type == "item.completed",
+                    if type == "thread.started",
+                       let conversationID,
+                       let threadID = json["thread_id"] as? String,
+                       !threadID.isEmpty {
+                        self.setSessionID(threadID, for: conversationID)
+                    } else if type == "item.completed",
                        let item = json["item"] as? [String: Any],
                        let itemType = item["type"] as? String,
                        itemType == "agent_message",
@@ -271,6 +338,7 @@ final class CodexClient: @unchecked Sendable {
 
             process.terminationHandler = { [self] proc in
                 outPipe.fileHandleForReading.readabilityHandler = nil
+                errPipe.fileHandleForReading.readabilityHandler = nil
                 SubprocessRegistry.shared.unregister(proc)
 
                 // 扫新增的图片
@@ -286,7 +354,8 @@ final class CodexClient: @unchecked Sendable {
                 }
 
                 if proc.terminationStatus != 0 {
-                    let err = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    var err = stderrBuffer.data
+                    err.append(errPipe.fileHandleForReading.readDataToEndOfFile())
                     let errStr = String(data: err, encoding: .utf8)?
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                         ?? "Codex 进程异常退出"
@@ -313,6 +382,26 @@ final class CodexClient: @unchecked Sendable {
                 SubprocessRegistry.shared.unregister(process)
             }
         }
+    }
+
+    private func sessionID(for conversationID: String?) -> String? {
+        guard let conversationID, !conversationID.isEmpty else { return nil }
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        let map = UserDefaults.standard.dictionary(forKey: Self.sessionMapKey) as? [String: String] ?? [:]
+        return map[conversationID]
+    }
+
+    private func setSessionID(_ sessionID: String, for conversationID: String) {
+        sessionLock.lock()
+        defer { sessionLock.unlock() }
+        var map = UserDefaults.standard.dictionary(forKey: Self.sessionMapKey) as? [String: String] ?? [:]
+        map[conversationID] = sessionID
+        UserDefaults.standard.set(map, forKey: Self.sessionMapKey)
+    }
+
+    private static var nullInput: FileHandle? {
+        FileHandle(forReadingAtPath: "/dev/null")
     }
 
     /// 从 Codex 事件 item 的几个常见字段里抽最有用的一个做简短摘要（≤40 字）。
@@ -364,4 +453,21 @@ private final class StreamState: @unchecked Sendable {
     var startedToolIds: Set<String> = []
     /// 已发出 HermesPetToolEnded 通知的 tool id 集合
     var endedToolIds: Set<String> = []
+}
+
+private final class CodexLockedData: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage = Data()
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return storage
+    }
+
+    func append(_ data: Data) {
+        lock.lock()
+        storage.append(data)
+        lock.unlock()
+    }
 }

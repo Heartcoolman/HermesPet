@@ -19,6 +19,7 @@ actor CLIAvailability {
     private struct Entry {
         let isAvailable: Bool
         let resolvedPath: String?
+        let shellPath: String?
         let checkedAt: Date
     }
 
@@ -54,7 +55,7 @@ actor CLIAvailability {
         }
 
         // 2) 实际跑一次检测（off-main，nonisolated 静态函数）
-        let result: (Bool, String?) = await withCheckedContinuation { continuation in
+        let result: (Bool, String?, String?) = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let detected = Self.detectPath(for: command)
                 continuation.resume(returning: detected)
@@ -65,11 +66,15 @@ actor CLIAvailability {
         cache[command] = Entry(
             isAvailable: result.0,
             resolvedPath: result.1,
+            shellPath: result.2,
             checkedAt: Date()
         )
 
         if let path = result.1, !path.isEmpty {
             UserDefaults.standard.set(path, forKey: userDefaultsKey)
+        }
+        if let shellPath = result.2, !shellPath.isEmpty {
+            UserDefaults.standard.set(shellPath, forKey: "cliLoginShellPATH")
         }
         return result.0
     }
@@ -80,12 +85,12 @@ actor CLIAvailability {
     ///   - 走 `zsh -lic 'command -v xxx'` 让 shell 加载用户 ~/.zshrc / ~/.zprofile，
     ///     才能拿到跟终端里一致的 PATH
     /// 失败/超时返回 (false, nil)，永远不抛错（这是个"探测"操作，不应该崩）
-    private nonisolated static func detectPath(for command: String) -> (Bool, String?) {
+    private nonisolated static func detectPath(for command: String) -> (Bool, String?, String?) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         // -l = login shell（加载 ~/.zprofile）; -i = interactive（加载 ~/.zshrc）;
         // -c = 跑后面这条命令。command -v 比 which 更标准也更快。
-        process.arguments = ["-lic", "command -v \(command)"]
+        process.arguments = ["-lic", "printf '__HERMESPET_PATH__%s\\n' \"$PATH\"; command -v \(command)"]
 
         let outPipe = Pipe()
         let errPipe = Pipe()
@@ -95,7 +100,7 @@ actor CLIAvailability {
         do {
             try process.run()
         } catch {
-            return (false, nil)
+            return (false, nil, nil)
         }
 
         // 2 秒兜底超时 —— 防止用户 .zshrc 里有死循环 / 同步网络请求把我们挂住
@@ -105,24 +110,26 @@ actor CLIAvailability {
         }
         if process.isRunning {
             process.terminate()
-            return (false, nil)
-        }
-
-        guard process.terminationStatus == 0 else {
-            return (false, nil)
+            return (false, nil, nil)
         }
         let data = outPipe.fileHandleForReading.readDataToEndOfFile()
         let raw = String(data: data, encoding: .utf8) ?? ""
-        // command -v 输出可能是 "claude: aliased to ..." 或纯路径；取最后一行的纯路径
-        let path = raw
+        let lines = raw
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        let shellPath = lines
+            .first(where: { $0.hasPrefix("__HERMESPET_PATH__") })
+            .map { String($0.dropFirst("__HERMESPET_PATH__".count)) }
+
+        // command -v 输出可能是 "claude: aliased to ..." 或纯路径；取最后一行的纯路径
+        let path = lines
             .last(where: { $0.hasPrefix("/") })
 
         guard let resolved = path, !resolved.isEmpty,
               FileManager.default.isExecutableFile(atPath: resolved) else {
-            return (false, nil)
+            return (false, nil, shellPath)
         }
-        return (true, resolved)
+        return (true, resolved, shellPath)
     }
 }

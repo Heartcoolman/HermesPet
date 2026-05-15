@@ -61,11 +61,39 @@ final class APIClient: @unchecked Sendable {
     /// SSE 流空闲超时（秒）。超过此值无数据 → 主动断流报错，避免卡到 timeoutIntervalForRequest 才返回
     private static let streamIdleTimeoutSeconds: TimeInterval = 90
 
-    /// 注入给 Hermes 的 system 提示 —— 让 AI 识别任务规划意图时输出 ```tasks fence。
+    /// 注入给 Hermes / 在线 AI 的 system 提示 —— 让 AI 识别任务规划意图时输出 ```tasks fence。
     /// Claude/Codex 的提示靠 prompt 末尾拼接（它们没 system 概念），Hermes/直连 走 OpenAI 兼容 API
     /// 直接前置一条 role=system 即可
-    private static let systemPrompt = """
+    private var systemPrompt: String {
+        let identityBlock: String
+        switch source {
+        case .hermes:
+            identityBlock = """
+            当前模式：Hermes
+            当前后端：Hermes Gateway / OpenAI 兼容 API
+            当前模型：\(modelName)
+            你可以称自己为 HermesPet 助手。不要自称 Claude、Claude Code 或 Codex。
+            """
+        case .direct:
+            let provider = ProviderPreset.detect(baseURL: baseURL)
+            let providerName = provider.id == "custom" ? "自定义 OpenAI 兼容服务" : provider.displayName
+            let preferenceRaw = UserDefaults.standard.string(forKey: "directAPIResponsePreference") ?? ""
+            let preference = DirectResponsePreference(rawValue: preferenceRaw) ?? .balanced
+            identityBlock = """
+            当前模式：在线 AI
+            当前服务商：\(providerName)
+            当前模型：\(modelName)
+            当前回复偏好：\(preference.label)
+            你运行在 HermesPet 的「在线 AI」模式。你可以说明自己是 HermesPet 在线 AI 助手，当前由 \(providerName) / \(modelName) 提供能力。
+            除非当前模式明确是 Claude Code 或 Codex，否则不要自称 Claude、Claude Code、Codex，也不要说自己处在 Codex 模式。
+            """
+        }
+
+        return """
     你运行在 HermesPet 桌面客户端。客户端约定：
+
+    【身份与配置】
+    \(identityBlock)
 
     1) 如果你想让用户做选择，用 Markdown 编号列表（1. xxx 2. yyy ...）。客户端会渲染成可点击卡片。
 
@@ -78,6 +106,7 @@ final class APIClient: @unchecked Sendable {
     ```
     客户端会渲染成可点击任务卡片，每张有 📌 Pin / 🤖 让 AI 做 / ✗ 跳过 按钮。**只在确实是任务规划场景用此格式**。
     """
+    }
 
     let source: ConfigSource
 
@@ -89,7 +118,23 @@ final class APIClient: @unchecked Sendable {
         UserDefaults.standard.string(forKey: source.baseURLKey) ?? source.defaultBaseURL
     }
     private var apiKey: String {
-        UserDefaults.standard.string(forKey: source.apiKeyKey) ?? ""
+        switch source {
+        case .hermes:
+            return UserDefaults.standard.string(forKey: source.apiKeyKey) ?? ""
+        case .direct:
+            let providerID = UserDefaults.standard.string(forKey: "directAPIProviderID") ?? ""
+            guard !providerID.isEmpty else {
+                return UserDefaults.standard.string(forKey: source.apiKeyKey) ?? ""
+            }
+
+            let providerKeyName = Self.directAPIKeyStorageKey(providerID: providerID)
+            // 区分“还没迁移过”(nil) 和“这个服务商明确没有 Key”(空字符串)。
+            // 前者允许读旧的 directAPIKey 兜底，后者必须保持空，避免拿别家 Key 去请求。
+            if UserDefaults.standard.object(forKey: providerKeyName) != nil {
+                return UserDefaults.standard.string(forKey: providerKeyName) ?? ""
+            }
+            return UserDefaults.standard.string(forKey: source.apiKeyKey) ?? ""
+        }
     }
     private var modelName: String {
         UserDefaults.standard.string(forKey: source.modelNameKey) ?? source.defaultModel
@@ -123,7 +168,7 @@ final class APIClient: @unchecked Sendable {
                     self.authorize(&request)
 
                     // 前置一条 system message 注入客户端约定（选项列表 / 任务规划 fence）
-                    var apiMessages: [APIMessage] = [APIMessage(role: "system", text: Self.systemPrompt)]
+                    var apiMessages: [APIMessage] = [APIMessage(role: "system", text: self.systemPrompt)]
                     apiMessages.append(contentsOf: messages.map {
                         APIMessage(role: $0.role.rawValue, text: $0.content, images: $0.images)
                     })
@@ -205,7 +250,10 @@ final class APIClient: @unchecked Sendable {
         authorize(&request)
         request.timeoutInterval = 120
 
-        let apiMessages = messages.map { APIMessage(role: $0.role.rawValue, text: $0.content, images: $0.images) }
+        var apiMessages: [APIMessage] = [APIMessage(role: "system", text: systemPrompt)]
+        apiMessages.append(contentsOf: messages.map {
+            APIMessage(role: $0.role.rawValue, text: $0.content, images: $0.images)
+        })
         let body = ChatCompletionRequest(model: modelName, messages: apiMessages, stream: false)
         request.httpBody = try JSONEncoder().encode(body)
 
@@ -285,5 +333,9 @@ final class APIClient: @unchecked Sendable {
     private func authorize(_ request: inout URLRequest) {
         guard !apiKey.isEmpty else { return }
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    }
+
+    private static func directAPIKeyStorageKey(providerID: String) -> String {
+        "directAPIKey.\(providerID)"
     }
 }

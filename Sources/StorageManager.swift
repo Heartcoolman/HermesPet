@@ -110,7 +110,7 @@ final class StorageManager: @unchecked Sendable {
                 let data = try Data(contentsOf: conversationsFile)
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
-                return try decoder.decode([Conversation].self, from: data)
+                return sanitizeLoadedConversations(try decoder.decode([Conversation].self, from: data))
             } catch {
                 // 把损坏文件改名备份，避免覆写丢失用户数据 + 让用户知道
                 let stamp = Int(Date().timeIntervalSince1970)
@@ -130,6 +130,29 @@ final class StorageManager: @unchecked Sendable {
         }
 
         return []
+    }
+
+    /// 持久化文件里不应该恢复“正在流式输出”的瞬时状态。
+    /// 如果 App 被 install.sh / 系统退出杀在半路，历史消息可能留下 isStreaming=true；
+    /// 重启后没有对应子进程继续写它，会在 UI 里变成永远的 thinking dots。
+    private func sanitizeLoadedConversations(_ conversations: [Conversation]) -> [Conversation] {
+        conversations.map { conv in
+            var fixed = conv
+            fixed.isStreaming = false
+            fixed.messages = fixed.messages.map { msg in
+                var m = msg
+                if m.isStreaming {
+                    m.isStreaming = false
+                    if m.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        m.content = "(上次生成被中断)"
+                    } else {
+                        m.content += "\n\n_(上次生成被中断)_"
+                    }
+                }
+                return m
+            }
+            return fixed
+        }
     }
 
     /// 把旧版的 session.json 转成一个 Conversation

@@ -5,6 +5,12 @@ struct ChatView: View {
 
     @State private var showClearConfirm = false
     @State private var isDropTargeted = false
+    /// 聊天区是否贴近底部。用户手动上滑看历史时置 false，
+    /// 流式输出就不再强行 scrollTo bottom 抢滚动。
+    @State private var isMessagesNearBottom = true
+
+    private static let messagesScrollSpace = "HermesPetMessagesScroll"
+    private static let messagesBottomAnchorID = "HermesPetMessagesBottomAnchor"
 
     var body: some View {
         VStack(spacing: 0) {
@@ -23,7 +29,10 @@ struct ChatView: View {
                 pendingImages: viewModel.pendingImages,
                 pendingDocuments: viewModel.pendingDocuments,
                 tint: headerTint,
-                onSend: { viewModel.sendMessage() },
+                onSend: {
+                    isMessagesNearBottom = true
+                    viewModel.sendMessage()
+                },
                 onCancel: { viewModel.cancelCurrentRequest() },
                 onPasteImage: { viewModel.addPendingImage($0) },
                 onRemoveImage: { viewModel.removePendingImage(at: $0) },
@@ -261,89 +270,128 @@ struct ChatView: View {
 
     private var messagesView: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    // 新对话欢迎页：精致的 WelcomeView 替代纯文字欢迎语
-                    if showSuggestions {
-                        WelcomeView(mode: viewModel.agentMode, tint: headerTint)
-                            .padding(.top, 12)
-                            .padding(.bottom, 8)
-                            .transition(.opacity)
+            GeometryReader { viewport in
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        // 新对话欢迎页：精致的 WelcomeView 替代纯文字欢迎语
+                        if showSuggestions {
+                            WelcomeView(mode: viewModel.agentMode, tint: headerTint)
+                                .padding(.top, 12)
+                                .padding(.bottom, 8)
+                                .transition(.opacity)
 
-                        // 轻量 Onboarding：Hermes 模式 + 没填 API Key 时显示"配置 Key"引导卡。
-                        // 不弹窗、不挡住其他 UI，点击即打开设置面板
-                        if showOnboardingCard {
-                            OnboardingCard(
-                                tint: headerTint,
-                                onTap: { viewModel.showSettings = true }
-                            )
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 4)
-                            .transition(.opacity.combined(with: .move(edge: .top)))
+                            // 轻量 Onboarding：Hermes 模式 + 没填 API Key 时显示"配置 Key"引导卡。
+                            // 不弹窗、不挡住其他 UI，点击即打开设置面板
+                            if showOnboardingCard {
+                                OnboardingCard(
+                                    tint: headerTint,
+                                    onTap: { viewModel.showSettings = true }
+                                )
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, 4)
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                            }
                         }
-                    }
 
-                    ForEach(viewModel.messages) { message in
-                        // 新对话状态下，"原始欢迎消息"由 WelcomeView 代替，不再显示这条 assistant 占位
-                        if !(showSuggestions && message.role == .assistant) {
-                            MessageBubbleView(
-                                message: message,
-                                agentMode: viewModel.agentMode,
-                                onRetry: { viewModel.retryLastMessage() },
-                                onChoiceSelected: { choice in
-                                    viewModel.submitVoiceInput(choice)
-                                },
-                                onPinTask: { task in
-                                    // 📌 Pin → 创建任务 Pin 到桌面
-                                    PinCardController.pinTask(task)
-                                },
-                                onDispatchTask: { task in
-                                    // 🤖 让 AI 做 → 新建对话派发给推荐的 mode
-                                    viewModel.dispatchTaskToNewConversation(task)
+                        ForEach(viewModel.messages) { message in
+                            // 新对话状态下，"原始欢迎消息"由 WelcomeView 代替，不再显示这条 assistant 占位
+                            if !(showSuggestions && message.role == .assistant) {
+                                MessageBubbleView(
+                                    message: message,
+                                    agentMode: viewModel.agentMode,
+                                    onRetry: { viewModel.retryLastMessage() },
+                                    onChoiceSelected: { choice in
+                                        viewModel.submitVoiceInput(choice)
+                                    },
+                                    onPinTask: { task in
+                                        // 📌 Pin → 创建任务 Pin 到桌面
+                                        PinCardController.pinTask(task)
+                                    },
+                                    onDispatchTask: { task in
+                                        // 🤖 让 AI 做 → 新建对话派发给推荐的 mode
+                                        viewModel.dispatchTaskToNewConversation(task)
+                                    }
+                                )
+                                    .id(message.id)
+                                    .transition(.asymmetric(
+                                        insertion: .opacity.combined(with: .move(edge: .bottom)),
+                                        removal: .opacity
+                                    ))
+                            }
+                        }
+
+                        // 新对话欢迎状态 —— 几个快捷启动卡片，点击即填入输入框
+                        if showSuggestions {
+                            SuggestionGrid(
+                                items: suggestionItems,
+                                tint: headerTint,
+                                onTap: { prompt in
+                                    viewModel.inputText = prompt
                                 }
                             )
-                                .id(message.id)
-                                .transition(.asymmetric(
-                                    insertion: .opacity.combined(with: .move(edge: .bottom)),
-                                    removal: .opacity
-                                ))
+                            .padding(.top, 4)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
-                    }
 
-                    // 新对话欢迎状态 —— 几个快捷启动卡片，点击即填入输入框
-                    if showSuggestions {
-                        SuggestionGrid(
-                            items: suggestionItems,
-                            tint: headerTint,
-                            onTap: { prompt in
-                                viewModel.inputText = prompt
-                            }
-                        )
-                        .padding(.top, 4)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        Color.clear
+                            .frame(height: 1)
+                            .id(Self.messagesBottomAnchorID)
+                            .background(
+                                GeometryReader { marker in
+                                    Color.clear.preference(
+                                        key: MessagesBottomYPreferenceKey.self,
+                                        value: marker.frame(in: .named(Self.messagesScrollSpace)).maxY
+                                    )
+                                }
+                            )
+                    }
+                    .padding(12)
+                    .animation(AnimTok.smooth, value: viewModel.messages.count)
+                    .animation(AnimTok.smooth, value: showSuggestions)
+                }
+                .coordinateSpace(name: Self.messagesScrollSpace)
+                .onPreferenceChange(MessagesBottomYPreferenceKey.self) { bottomY in
+                    let distanceToBottom = bottomY - viewport.size.height
+                    isMessagesNearBottom = distanceToBottom < 72
+                }
+                .onAppear {
+                    scrollToBottom(proxy, animated: false)
+                }
+                .onChange(of: viewModel.activeConversationID) { _, _ in
+                    isMessagesNearBottom = true
+                    scrollToBottom(proxy, animated: false)
+                }
+                .onChange(of: viewModel.messages.count) { _, _ in
+                    if isMessagesNearBottom {
+                        scrollToBottom(proxy)
                     }
                 }
-                .padding(12)
-                .animation(AnimTok.smooth, value: viewModel.messages.count)
-                .animation(AnimTok.smooth, value: showSuggestions)
-            }
-            .onChange(of: viewModel.messages.count) { _, _ in
-                scrollToLast(proxy)
-            }
-            .onChange(of: viewModel.messages.last?.content.count) { _, _ in
-                if viewModel.messages.last?.isStreaming == true {
-                    scrollToLast(proxy)
+                .onChange(of: viewModel.messages.last?.content.count) { _, _ in
+                    if viewModel.messages.last?.isStreaming == true, isMessagesNearBottom {
+                        scrollToBottom(proxy)
+                    }
                 }
             }
         }
     }
 
-    private func scrollToLast(_ proxy: ScrollViewProxy) {
-        if let last = viewModel.messages.last {
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        guard !viewModel.messages.isEmpty else { return }
+        if animated {
             withAnimation(AnimTok.smooth) {
-                proxy.scrollTo(last.id, anchor: .bottom)
+                proxy.scrollTo(Self.messagesBottomAnchorID, anchor: .bottom)
             }
+        } else {
+            proxy.scrollTo(Self.messagesBottomAnchorID, anchor: .bottom)
         }
+    }
+}
+
+private struct MessagesBottomYPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .zero
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -649,17 +697,6 @@ struct ConversationPill: View {
                 .font(.system(size: 11, weight: isActive ? .bold : .medium))
                 .foregroundStyle(isActive ? Color.white : .secondary)
                 .frame(minWidth: 10)
-            // hover 时显示关闭按钮（仅当 >1 个对话时）
-            if isHovering && canClose {
-                Button(action: onClose) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(isActive ? Color.white.opacity(0.95) : .secondary)
-                }
-                .buttonStyle(.plain)
-                .help("关闭这个对话")
-                .transition(.opacity.combined(with: .scale))
-            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 3)
@@ -709,7 +746,7 @@ struct ConversationPill: View {
         .onHover { hovering in
             withAnimation(AnimTok.snappy) { isHovering = hovering }
         }
-        .help(title)
+        .help(canClose ? "\(title) · 右键可关闭" : title)
         // 右键菜单：重命名、关闭
         .contextMenu {
             Button {

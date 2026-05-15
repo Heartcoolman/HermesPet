@@ -88,10 +88,20 @@ final class ChatViewModel {
         didSet { UserDefaults.standard.set(directAPIBaseURL, forKey: "directAPIBaseURL") }
     }
     var directAPIKey: String {
-        didSet { UserDefaults.standard.set(directAPIKey, forKey: "directAPIKey") }
+        didSet {
+            UserDefaults.standard.set(directAPIKey, forKey: "directAPIKey")
+            let providerID = UserDefaults.standard.string(forKey: "directAPIProviderID") ?? ""
+            if !providerID.isEmpty {
+                UserDefaults.standard.set(directAPIKey, forKey: Self.directAPIKeyStorageKey(providerID: providerID))
+            }
+        }
     }
     var directAPIModel: String {
         didSet { UserDefaults.standard.set(directAPIModel, forKey: "directAPIModel") }
+    }
+    /// 在线 AI 的回复偏好，默认平衡。最终仍会映射成 directAPIModel 发给 API。
+    var directAPIResponsePreference: DirectResponsePreference {
+        didSet { UserDefaults.standard.set(directAPIResponsePreference.rawValue, forKey: "directAPIResponsePreference") }
     }
     /// 上一次用过的 mode —— 持久化到 UserDefaults["agentMode"]。
     /// 新建对话时把这个值作为默认 mode 继承下去；切对话 / 切 mode 时也会跟着更新，
@@ -231,14 +241,26 @@ final class ChatViewModel {
     private let storage = StorageManager.shared
     private var statusTimer: Timer?
 
+    static func directAPIKeyStorageKey(providerID: String) -> String {
+        "directAPIKey.\(providerID)"
+    }
+
     init() {
         self.apiBaseURL = UserDefaults.standard.string(forKey: "apiBaseURL") ?? "http://localhost:8642/v1"
         self.apiKey = UserDefaults.standard.string(forKey: "apiKey") ?? ""
         self.modelName = UserDefaults.standard.string(forKey: "modelName") ?? "hermes-agent"
         // 在线 AI：默认不预填，让用户通过设置面板的 ProviderPreset Picker 选一家
         self.directAPIBaseURL = UserDefaults.standard.string(forKey: "directAPIBaseURL") ?? ""
-        self.directAPIKey = UserDefaults.standard.string(forKey: "directAPIKey") ?? ""
+        let savedDirectProvider = UserDefaults.standard.string(forKey: "directAPIProviderID") ?? ""
+        if !savedDirectProvider.isEmpty,
+           let providerKey = UserDefaults.standard.string(forKey: Self.directAPIKeyStorageKey(providerID: savedDirectProvider)) {
+            self.directAPIKey = providerKey
+        } else {
+            self.directAPIKey = UserDefaults.standard.string(forKey: "directAPIKey") ?? ""
+        }
         self.directAPIModel = UserDefaults.standard.string(forKey: "directAPIModel") ?? ""
+        let savedPreference = UserDefaults.standard.string(forKey: "directAPIResponsePreference")
+        self.directAPIResponsePreference = DirectResponsePreference(rawValue: savedPreference ?? "") ?? .balanced
         let savedMode = UserDefaults.standard.string(forKey: "agentMode")
         // 全新用户默认走「在线 AI」—— 对方拿到 dmg 多半没装 Hermes Gateway 也没 claude/codex CLI，
         // directAPI 配上 API Key 就能立刻用。老用户的 agentMode UserDefaults 还在，不受影响
@@ -661,7 +683,10 @@ final class ChatViewModel {
                     // 实现跨 AI 共享记忆
                     stream = claudeClient.streamCompletion(messages: apiMessages)
                 case .codex:
-                    stream = codexClient.streamCompletion(messages: apiMessages)
+                    stream = codexClient.streamCompletion(
+                        messages: apiMessages,
+                        conversationID: targetConversationID
+                    )
                 }
 
                 var fullContent = ""
@@ -976,6 +1001,7 @@ final class ChatViewModel {
         }
         // 清空时也重置 Claude 的会话延续状态
         claudeClient.resetSession()
+        codexClient.resetSession(conversationID: activeConversationID)
         storage.saveConversations(conversations)
     }
 
@@ -1117,6 +1143,9 @@ final class ChatViewModel {
         // 关闭前清理图片文件
         let allPaths = conversations[idx].messages.flatMap { $0.imagePaths }
         if !allPaths.isEmpty { storage.deleteImageFiles(allPaths) }
+        if conversations[idx].mode == .codex {
+            codexClient.resetSession(conversationID: id)
+        }
 
         let wasActive = (id == activeConversationID)
         conversations.remove(at: idx)
