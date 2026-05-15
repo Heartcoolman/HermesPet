@@ -247,6 +247,8 @@ HermesPet is currently a one-person open-source project. Every issue / PR / star
 
 <div align="center">
 
-Made with ✦ on a MacBook · Desktop AI should feel alive
+Made with ✦, coffee, and stubborn love on a MacBook
+
+*For everyone who's ever wished their AI felt a little more alive.*
 
 </div>
