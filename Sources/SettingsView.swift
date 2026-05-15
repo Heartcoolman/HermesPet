@@ -1,4 +1,5 @@
 import SwiftUI
+import Carbon
 
 /// 设置面板 —— macOS Sonoma 系统设置风格：
 /// - 左侧 156pt 侧栏分类列表
@@ -11,6 +12,7 @@ struct SettingsView: View {
     @State private var showKey = false
     @State private var testing = false
     @State private var testResult: (success: Bool, message: String)?
+    @State private var hotkeyRefreshID = UUID()
     /// 当前正在"查看 / 编辑配置"的 mode。
     /// **不绑定 viewModel.agentMode** —— 设置里调这个 Picker 不会切换正在进行的对话的 mode，
     /// 仅决定下面 hermesConfig / claudeCard / codexCard 显示哪一个。
@@ -986,12 +988,31 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                aboutRow(icon: "command", label: "呼出聊天", value: "⌘⇧H")
-                aboutRow(icon: "camera.viewfinder", label: "截屏附加", value: "⌘⇧J")
-                aboutRow(icon: "mic.fill", label: "按住说话", value: "⌘⇧V")
-                aboutRow(icon: "bolt.fill", label: "快问浮窗", value: "⌘⇧Space")
+                ForEach(HotkeyAction.allCases) { action in
+                    hotkeyRow(action)
+                }
                 aboutRow(icon: "folder.fill", label: "存储位置", value: "~/.hermespet/")
             }
+            .id(hotkeyRefreshID)
+        }
+    }
+
+    private func hotkeyRow(_ action: HotkeyAction) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: action.icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 16)
+            Text(action.title)
+                .font(.system(size: 12))
+            Spacer()
+            HotkeyRecorderButton(
+                hotkey: action.currentHotkey,
+                onChange: { hotkey in
+                    action.save(hotkey)
+                    hotkeyRefreshID = UUID()
+                    NotificationCenter.default.post(name: .hermesPetHotkeysChanged, object: nil)
+                }
+            )
         }
     }
 
@@ -1123,4 +1144,105 @@ struct SettingsView: View {
         }
         return error.localizedDescription
     }
+}
+
+// MARK: - 快捷键录制按钮
+
+private struct HotkeyRecorderButton: NSViewRepresentable {
+    let hotkey: Hotkey
+    let onChange: (Hotkey) -> Void
+
+    func makeNSView(context: Context) -> HotkeyRecorderNSButton {
+        let button = HotkeyRecorderNSButton()
+        button.bezelStyle = .rounded
+        button.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        button.setButtonType(.momentaryPushIn)
+        button.onCapture = onChange
+        button.hotkey = hotkey
+        return button
+    }
+
+    func updateNSView(_ nsView: HotkeyRecorderNSButton, context: Context) {
+        nsView.onCapture = onChange
+        nsView.hotkey = hotkey
+    }
+}
+
+private final class HotkeyRecorderNSButton: NSButton {
+    var onCapture: ((Hotkey) -> Void)?
+    private var localKeyMonitor: Any?
+
+    var hotkey: Hotkey = Hotkey(keyCode: UInt32(kVK_ANSI_H), modifiers: UInt32(cmdKey | shiftKey)) {
+        didSet {
+            if !isRecording {
+                title = hotkey.displayText
+            }
+        }
+    }
+
+    private var isRecording = false {
+        didSet {
+            title = isRecording ? "按下新快捷键…" : hotkey.displayText
+            contentTintColor = isRecording ? NSColor.controlAccentColor : nil
+            if isRecording {
+                installKeyMonitor()
+            } else {
+                removeKeyMonitor()
+            }
+        }
+    }
+
+    override var acceptsFirstResponder: Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        isRecording = true
+        window?.makeFirstResponder(self)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        isRecording = false
+        return super.resignFirstResponder()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        guard isRecording else {
+            super.keyDown(with: event)
+            return
+        }
+
+        capture(event)
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.isRecording else { return event }
+            self.capture(event)
+            return nil
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let localKeyMonitor {
+            NSEvent.removeMonitor(localKeyMonitor)
+            self.localKeyMonitor = nil
+        }
+    }
+
+    private func capture(_ event: NSEvent) {
+        let keyCode = UInt32(event.keyCode)
+        if keyCode == UInt32(kVK_Escape) {
+            isRecording = false
+            return
+        }
+
+        let next = Hotkey(
+            keyCode: keyCode,
+            modifiers: HotkeyFormatter.carbonModifiers(from: event.modifierFlags)
+        )
+        hotkey = next
+        isRecording = false
+        onCapture?(next)
+    }
+
 }

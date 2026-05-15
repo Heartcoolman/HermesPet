@@ -2,7 +2,7 @@ import Foundation
 import Carbon
 
 /// 全局热键管理（Carbon Event Manager）。
-/// 当前注册：
+/// 全局热键可在设置页自定义，默认值：
 ///   - Cmd+Shift+H → 切换聊天窗口（id=1，仅 down）
 ///   - Cmd+Shift+J → 截屏并附加到聊天（id=2，仅 down）
 ///   - Cmd+Shift+V → 按住说话（id=3，监听 down + up，实现 push-to-talk）
@@ -21,6 +21,7 @@ final class GlobalHotkey {
     nonisolated(unsafe) static let shared = GlobalHotkey()
 
     private nonisolated(unsafe) static var handlerInstalled = false
+    private var isObservingChanges = false
 
     func register(
         toggle: @escaping () -> Void,
@@ -34,6 +35,16 @@ final class GlobalHotkey {
         GlobalHotkey._voiceDownHandler = voiceDown
         GlobalHotkey._voiceUpHandler   = voiceUp
         GlobalHotkey._quickAskHandler  = quickAsk
+
+        if !isObservingChanges {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(handleHotkeysChanged),
+                name: .hermesPetHotkeysChanged,
+                object: nil
+            )
+            isObservingChanges = true
+        }
 
         // 全局事件 handler 只装一次。监听 keyPressed + keyReleased 两种事件。
         if !GlobalHotkey.handlerInstalled {
@@ -77,45 +88,32 @@ final class GlobalHotkey {
             GlobalHotkey.handlerInstalled = true
         }
 
-        // 三个全局热键，注册失败时弹灵动岛通知告诉用户哪个被占用
+        reloadRegistration()
+    }
+
+    @objc private func handleHotkeysChanged() {
+        reloadRegistration()
+    }
+
+    private func reloadRegistration() {
+        unregisterAll()
+
+        // 全局热键，注册失败时弹灵动岛通知告诉用户哪个被占用
         var failures: [String] = []
 
-        toggleHotKeyRef = Self.tryRegister(
-            keyCode: UInt32(kVK_ANSI_H),
-            modifiers: UInt32(cmdKey | shiftKey),
-            id: 1
-        ) ?? {
-            failures.append("⌘⇧H（呼出聊天）")
-            return nil
-        }()
-
-        captureHotKeyRef = Self.tryRegister(
-            keyCode: UInt32(kVK_ANSI_J),
-            modifiers: UInt32(cmdKey | shiftKey),
-            id: 2
-        ) ?? {
-            failures.append("⌘⇧J（截屏）")
-            return nil
-        }()
-
-        voiceHotKeyRef = Self.tryRegister(
-            keyCode: UInt32(kVK_ANSI_V),
-            modifiers: UInt32(cmdKey | shiftKey),
-            id: 3
-        ) ?? {
-            failures.append("⌘⇧V（语音）")
-            return nil
-        }()
-
-        // ⌘⇧Space —— Spotlight 风快问（kVK_Space = 49）
-        quickAskHotKeyRef = Self.tryRegister(
-            keyCode: UInt32(kVK_Space),
-            modifiers: UInt32(cmdKey | shiftKey),
-            id: 4
-        ) ?? {
-            failures.append("⌘⇧Space（快问）")
-            return nil
-        }()
+        for action in HotkeyAction.allCases {
+            let hotkey = action.currentHotkey
+            let ref = Self.tryRegister(
+                keyCode: hotkey.keyCode,
+                modifiers: hotkey.modifiers,
+                id: action.hotkeyID
+            )
+            if let ref {
+                setRef(ref, for: action)
+            } else {
+                failures.append("\(hotkey.displayText)（\(action.title)）")
+            }
+        }
 
         if !failures.isEmpty {
             // 通过截图通知通道弹灵动岛提示（这条通道短暂展开胶囊显示文字）
@@ -127,6 +125,15 @@ final class GlobalHotkey {
                     userInfo: ["text": msg, "count": 0]
                 )
             }
+        }
+    }
+
+    private func setRef(_ ref: EventHotKeyRef, for action: HotkeyAction) {
+        switch action {
+        case .toggleChat:    toggleHotKeyRef = ref
+        case .captureScreen: captureHotKeyRef = ref
+        case .voiceInput:    voiceHotKeyRef = ref
+        case .quickAsk:      quickAskHotKeyRef = ref
         }
     }
 
@@ -146,9 +153,18 @@ final class GlobalHotkey {
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
+        unregisterAll()
+    }
+
+    private func unregisterAll() {
         if let ref = toggleHotKeyRef   { UnregisterEventHotKey(ref) }
         if let ref = captureHotKeyRef  { UnregisterEventHotKey(ref) }
         if let ref = voiceHotKeyRef    { UnregisterEventHotKey(ref) }
         if let ref = quickAskHotKeyRef { UnregisterEventHotKey(ref) }
+        toggleHotKeyRef = nil
+        captureHotKeyRef = nil
+        voiceHotKeyRef = nil
+        quickAskHotKeyRef = nil
     }
 }

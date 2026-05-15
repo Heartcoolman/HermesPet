@@ -88,11 +88,9 @@ struct ChatView: View {
         // 嵌套 layout cycle，macOS 26 直接抛 NSException 必崩（issue #3 的 .ips 就是这个）。
         // 最小尺寸由 NSWindow.contentMinSize 在动画外控制（ChatWindowController init 里设 360×360）。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 注：背景磨砂层不在这里画 —— 由 ChatWindowController 给 NSWindow 挂的
-        // NSVisualEffectView (material = .popover) 提供，那才是 Spotlight / 通知中心
-        // 同款"浮窗白磨砂"的来源。SwiftUI 的 .background(.regularMaterial) 套在
-        // backgroundColor = .clear 的 NSWindow 上得到的只是叠加层，缺少原生 vibrancy，
-        // 会偏灰偏暗。
+        // v1.0 的稳定窗口结构：SwiftUI 自己提供 material 背景，NSWindow 只承载 hosting controller。
+        // 不再用 NSVisualEffectView 手动包 hosting view；那会在 transparent titlebar 下引入顶部空白/遮挡。
+        .background(.ultraThinMaterial)
         // 圆角浮窗：clipShape + window.hasShadow=true 让阴影也跟着圆角走
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         // 极淡边框增强层次感
@@ -710,17 +708,37 @@ struct ConversationPill: View {
     @State private var isRenaming = false
     @State private var renameDraft = ""
     @State private var streamPulse = false
+    private let pillDiameter: CGFloat = 18
+    private var expandedWidth: CGFloat { (isHovering && canClose) ? 34 : pillDiameter }
 
     var body: some View {
-        HStack(spacing: 3) {
-            Text("\(index)")
-                .font(.system(size: 11, weight: isActive ? .bold : .medium))
-                .foregroundStyle(isActive ? Color.white : .secondary)
-                .frame(minWidth: 10)
+        HStack(spacing: isHovering && canClose ? 4 : 3) {
+            Button(action: onSelect) {
+                Text("\(index)")
+                    .font(.system(size: 11, weight: isActive ? .bold : .medium))
+                    .foregroundStyle(isActive ? Color.white : .secondary)
+                    .frame(width: 10, height: pillDiameter)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isHovering && canClose {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(isActive ? Color.white.opacity(0.9) : .secondary)
+                        .frame(width: 10, height: pillDiameter)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("关闭对话")
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.72, anchor: .leading).combined(with: .opacity),
+                    removal: .scale(scale: 0.72, anchor: .leading).combined(with: .opacity)
+                ))
+            }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 3)
-        .frame(minHeight: 18)
+        .frame(width: expandedWidth, height: pillDiameter)
         .background(
             Capsule()
                 .fill(isActive
@@ -761,12 +779,12 @@ struct ConversationPill: View {
         }
         .animation(AnimTok.snappy, value: hasUnread)
         .animation(AnimTok.snappy, value: isBackgroundStreaming)
+        .animation(AnimTok.snappy, value: isHovering)
         .contentShape(Capsule())
-        .onTapGesture { onSelect() }
         .onHover { hovering in
             withAnimation(AnimTok.snappy) { isHovering = hovering }
         }
-        .help(canClose ? "\(title) · 右键可关闭" : title)
+        .help(canClose ? "\(title) · 悬停可关闭，右键可重命名" : title)
         // 右键菜单：重命名、关闭
         .contextMenu {
             Button {
@@ -806,13 +824,14 @@ struct ConversationPill: View {
 struct AddPillButton: View {
     let onAdd: () -> Void
     @State private var isHovering = false
+    private let pillDiameter: CGFloat = 18
 
     var body: some View {
         Button(action: onAdd) {
             Image(systemName: "plus")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 18, height: 18)
+                .frame(width: pillDiameter, height: pillDiameter)
                 .background(
                     Capsule()
                         .fill(Color.primary.opacity(isHovering ? 0.08 : 0))
