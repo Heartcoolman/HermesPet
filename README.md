@@ -9,6 +9,8 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/basionwang-bot/HermesPet/pulls)
 
+🌍 **中文** · [English](./README.en.md)
+
 </div>
 
 ---
