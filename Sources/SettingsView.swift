@@ -171,6 +171,15 @@ struct SettingsView: View {
             configViewingMode = viewModel.agentMode
             // 反查"在线 AI"当前是哪个预设
             selectedProvider = ProviderPreset.detect(baseURL: viewModel.directAPIBaseURL)
+            if selectedProvider.id != "custom" {
+                UserDefaults.standard.set(selectedProvider.id, forKey: "directAPIProviderID")
+                loadDirectAPIKey(for: selectedProvider, allowLegacyMigration: true)
+            }
+            if selectedProvider.id != "custom",
+               let detected = selectedProvider.preference(for: viewModel.directAPIModel) {
+                viewModel.directAPIResponsePreference = detected
+            }
+            ensureDirectProviderConfig()
         }
     }
 
@@ -281,11 +290,38 @@ struct SettingsView: View {
                     .help(showKey ? "隐藏密钥" : "显示密钥")
                 }
             }
-            settingRow("模型") {
-                TextField(selectedProvider.defaultModel.isEmpty ? "gpt-4o-mini" : selectedProvider.defaultModel,
-                          text: $viewModel.directAPIModel)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12, design: .monospaced))
+            if selectedProvider.id == "custom" {
+                settingRow("模型") {
+                    TextField("gpt-4o-mini", text: $viewModel.directAPIModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                }
+            } else {
+                settingRow("回复偏好") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Picker(selection: $viewModel.directAPIResponsePreference) {
+                            ForEach(DirectResponsePreference.allCases) { preference in
+                                Text(preference.label).tag(preference)
+                            }
+                        } label: { EmptyView() }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .onChange(of: viewModel.directAPIResponsePreference) { _, _ in
+                            syncDirectModelWithPreference()
+                        }
+
+                        Text(viewModel.directAPIResponsePreference.caption)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                settingRow("当前模型") {
+                    Text(selectedProvider.model(for: viewModel.directAPIResponsePreference))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             testConnectionRow
@@ -295,19 +331,57 @@ struct SettingsView: View {
         }
     }
 
-    /// 应用预设到「在线 AI」配置：写入 baseURL + 把模型名切到该预设默认值（如果用户没动过）
+    /// 应用预设到「在线 AI」配置：写入 baseURL + 按当前回复偏好映射模型。
+    /// 预设模式不让用户手填模型名，避免“选了服务商但模型/API 地址没真正写入”的错觉。
     private func applyProviderPreset(_ preset: ProviderPreset) {
-        guard preset.id != "custom" else { return }   // 自定义不动现有配置
+        guard preset.id != "custom" else {
+            UserDefaults.standard.set(preset.id, forKey: "directAPIProviderID")
+            loadDirectAPIKey(for: preset)
+            return
+        }
+        UserDefaults.standard.set(preset.id, forKey: "directAPIProviderID")
         if !preset.baseURL.isEmpty {
             viewModel.directAPIBaseURL = preset.baseURL
         }
-        // 模型名替换条件：当前值空 或 当前值是其他预设的默认模型（说明用户没自定义过）
-        let knownDefaults = Set(ProviderPreset.all.map { $0.defaultModel })
-        let currentIsKnownDefault = knownDefaults.contains(viewModel.directAPIModel)
-            || viewModel.directAPIModel.isEmpty
-        if currentIsKnownDefault {
-            viewModel.directAPIModel = preset.defaultModel
+        loadDirectAPIKey(for: preset)
+        syncDirectModelWithPreference(for: preset)
+        testResult = nil
+    }
+
+    /// API Key 按服务商独立保存。切到没配置过的服务商时显示空，避免拿 DeepSeek key 去测智谱造成误导。
+    private func loadDirectAPIKey(for preset: ProviderPreset,
+                                  allowLegacyMigration: Bool = false) {
+        let keyName = ChatViewModel.directAPIKeyStorageKey(providerID: preset.id)
+        if UserDefaults.standard.object(forKey: keyName) != nil {
+            viewModel.directAPIKey = UserDefaults.standard.string(forKey: keyName) ?? ""
+            return
         }
+
+        let legacyKey = UserDefaults.standard.string(forKey: "directAPIKey") ?? ""
+        if allowLegacyMigration,
+           !legacyKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            viewModel.directAPIKey = legacyKey
+        } else {
+            viewModel.directAPIKey = ""
+        }
+    }
+
+    /// 设置页首次打开时，如果 directAPIBaseURL 为空，Picker 会默认显示 DeepSeek。
+    /// 必须同时把 DeepSeek 的 baseURL/model 真写入 ViewModel，否则测试连接会拿空 URL 报“不支持的 URL”。
+    private func ensureDirectProviderConfig() {
+        guard selectedProvider.id != "custom" else { return }
+        if viewModel.directAPIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            viewModel.directAPIBaseURL = selectedProvider.baseURL
+        }
+        if viewModel.directAPIModel.isEmpty || selectedProvider.preference(for: viewModel.directAPIModel) == nil {
+            syncDirectModelWithPreference()
+        }
+    }
+
+    private func syncDirectModelWithPreference(for preset: ProviderPreset? = nil) {
+        let resolved = preset ?? selectedProvider
+        guard resolved.id != "custom" else { return }
+        viewModel.directAPIModel = resolved.model(for: viewModel.directAPIResponsePreference)
         testResult = nil
     }
 
@@ -332,6 +406,11 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             default:
+                if viewModel.directAPIKey.isEmpty {
+                    Text("当前服务商尚未配置 Key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if let url = selectedProvider.signupURL {
                     Text("还没 API Key？")
                         .font(.caption)
@@ -980,29 +1059,68 @@ struct SettingsView: View {
     }
 
     /// 测试连接 —— 按当前查看的 configViewingMode 决定测哪一组配置。
-    /// Hermes 走 /health，directAPI 走 /models（OpenAI 标准）。其他 mode 没意义不暴露按钮。
+    /// Hermes 走 /health；在线 AI 必须真实发一条 chat/completions ping，
+    /// 这样才能校验 API Key 是否属于当前服务商、模型是否可用。
     private func testConnection() {
         testing = true
         testResult = nil
         let source: APIClient.ConfigSource = (configViewingMode == .directAPI) ? .direct : .hermes
         let client = APIClient(source: source)
         Task {
-            do {
-                let ok = try await client.checkHealth()
-                let label = (source == .direct) ? "服务商连通" : "Hermes API 在线"
-                testResult = (ok, ok ? label : "健康检查未通过")
-            } catch {
-                // 健康检查不通 → 退一步发一条 ping 试试。有些自部署的 Hermes /health 没开
+            if source == .direct {
+                if viewModel.directAPIBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    testResult = (false, "请先选择服务商")
+                } else if viewModel.directAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    testResult = (false, "请先填写 API Key")
+                } else if viewModel.directAPIModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    testResult = (false, "请先选择模型")
+                } else {
+                    do {
+                        _ = try await client.sendMessage(messages: [
+                            ChatMessage(role: .user, content: "ping")
+                        ])
+                        testResult = (true, "Key 与模型可用")
+                    } catch {
+                        testResult = (false, directTestErrorMessage(error))
+                    }
+                }
+            } else {
                 do {
-                    _ = try await client.sendMessage(messages: [
-                        ChatMessage(role: .user, content: "ping")
-                    ])
-                    testResult = (true, "连接成功")
+                    let ok = try await client.checkHealth()
+                    testResult = (ok, ok ? "Hermes API 在线" : "健康检查未通过")
                 } catch {
-                    testResult = (false, error.localizedDescription)
+                    // 健康检查不通 → 退一步发一条 ping 试试。有些自部署的 Hermes /health 没开
+                    do {
+                        _ = try await client.sendMessage(messages: [
+                            ChatMessage(role: .user, content: "ping")
+                        ])
+                        testResult = (true, "连接成功")
+                    } catch {
+                        testResult = (false, error.localizedDescription)
+                    }
                 }
             }
             testing = false
         }
+    }
+
+    private func directTestErrorMessage(_ error: Error) -> String {
+        if case APIError.httpError(let code, let body) = error {
+            switch code {
+            case 401, 403:
+                return "API Key 不属于当前服务商或无权限"
+            case 404:
+                return "模型不存在或 API 地址不正确"
+            case 429:
+                return "请求过于频繁或额度不足"
+            default:
+                let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return "HTTP \(code): \(String(trimmed.prefix(80)))"
+                }
+                return "HTTP \(code)"
+            }
+        }
+        return error.localizedDescription
     }
 }

@@ -153,11 +153,12 @@ final class QuickAskWindowController {
 
     fileprivate func handlePin() {
         guard !state.answer.isEmpty, !state.isStreaming else { return }
-        let success = PinCardController.pin(content: state.answer, mode: state.currentMode)
-        // 视觉反馈：把"用户问题"那一行短暂换成提示文字
+        let result = PinCardController.pin(content: state.answer, mode: state.currentMode)
         let original = state.lastQuestion
-        if success {
+        if result == .added {
             state.lastQuestion = "📌 已 Pin 到桌面"
+        } else if result == .duplicate {
+            state.lastQuestion = "⚠️ 已经 Pin 过这条内容了"
         } else {
             state.lastQuestion = "⚠️ 桌面 Pin 已达 \(PinStore.maxPins) 张上限，请先关一张"
         }

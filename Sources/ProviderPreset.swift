@@ -1,5 +1,30 @@
 import Foundation
 
+/// 在线 AI 的易懂回复偏好。UI 面向用户展示这个，而不是直接暴露模型字符串。
+enum DirectResponsePreference: String, CaseIterable, Identifiable, Hashable {
+    case fast
+    case balanced
+    case deep
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fast: return "快速"
+        case .balanced: return "平衡"
+        case .deep: return "深度"
+        }
+    }
+
+    var caption: String {
+        switch self {
+        case .fast: return "更快，适合日常问答"
+        case .balanced: return "默认推荐，速度和质量均衡"
+        case .deep: return "更慢，适合复杂问题"
+        }
+    }
+}
+
 /// Hermes 模式的"服务商预设" —— 让没装 Claude Code / Codex CLI 的用户
 /// 也能开箱即用：选一家服务商，自动填好 baseURL + 推荐模型，只需要再粘 API Key。
 ///
@@ -14,6 +39,29 @@ struct ProviderPreset: Identifiable, Hashable {
     let defaultModel: String// 推荐主力模型
     let altModels: [String] // 备选模型（写进 placeholder / 文档提示）
     let signupURL: String?  // 注册 / 获取 API Key 的入口（用户点"如何获取 Key"时跳）
+    private let fastModel: String
+    private let balancedModel: String
+    private let deepModel: String
+
+    init(id: String,
+         displayName: String,
+         baseURL: String,
+         defaultModel: String,
+         altModels: [String],
+         signupURL: String?,
+         fastModel: String? = nil,
+         balancedModel: String? = nil,
+         deepModel: String? = nil) {
+        self.id = id
+        self.displayName = displayName
+        self.baseURL = baseURL
+        self.defaultModel = defaultModel
+        self.altModels = altModels
+        self.signupURL = signupURL
+        self.fastModel = fastModel ?? defaultModel
+        self.balancedModel = balancedModel ?? defaultModel
+        self.deepModel = deepModel ?? defaultModel
+    }
 
     /// 预设列表 —— 顺序就是 UI 上 Picker 显示的顺序。
     /// 模型字符串以 2026-05 各家官方文档为准。
@@ -24,7 +72,10 @@ struct ProviderPreset: Identifiable, Hashable {
             baseURL: "https://api.deepseek.com/v1",
             defaultModel: "deepseek-v4-pro",
             altModels: ["deepseek-v4-flash"],
-            signupURL: "https://platform.deepseek.com/api_keys"
+            signupURL: "https://platform.deepseek.com/api_keys",
+            fastModel: "deepseek-v4-flash",
+            balancedModel: "deepseek-v4-pro",
+            deepModel: "deepseek-v4-pro"
         ),
         ProviderPreset(
             id: "zhipu",
@@ -32,7 +83,10 @@ struct ProviderPreset: Identifiable, Hashable {
             baseURL: "https://open.bigmodel.cn/api/paas/v4",
             defaultModel: "glm-5",
             altModels: ["glm-5.1", "glm-5-turbo"],
-            signupURL: "https://open.bigmodel.cn/usercenter/apikeys"
+            signupURL: "https://open.bigmodel.cn/usercenter/apikeys",
+            fastModel: "glm-5-turbo",
+            balancedModel: "glm-5",
+            deepModel: "glm-5.1"
         ),
         ProviderPreset(
             id: "moonshot",
@@ -40,7 +94,10 @@ struct ProviderPreset: Identifiable, Hashable {
             baseURL: "https://api.moonshot.cn/v1",
             defaultModel: "kimi-k2.6",
             altModels: ["kimi-k2.5", "kimi-k2"],
-            signupURL: "https://platform.moonshot.cn/console/api-keys"
+            signupURL: "https://platform.moonshot.cn/console/api-keys",
+            fastModel: "kimi-k2",
+            balancedModel: "kimi-k2.5",
+            deepModel: "kimi-k2.6"
         ),
         ProviderPreset(
             id: "openai",
@@ -48,7 +105,10 @@ struct ProviderPreset: Identifiable, Hashable {
             baseURL: "https://api.openai.com/v1",
             defaultModel: "gpt-5.4",
             altModels: ["gpt-5.5", "gpt-5.4-mini"],
-            signupURL: "https://platform.openai.com/api-keys"
+            signupURL: "https://platform.openai.com/api-keys",
+            fastModel: "gpt-5.4-mini",
+            balancedModel: "gpt-5.4",
+            deepModel: "gpt-5.5"
         )
     ]
 
@@ -88,5 +148,21 @@ struct ProviderPreset: Identifiable, Hashable {
             if normalized == presetURL { return preset }
         }
         return custom
+    }
+
+    func model(for preference: DirectResponsePreference) -> String {
+        switch preference {
+        case .fast: return fastModel
+        case .balanced: return balancedModel
+        case .deep: return deepModel
+        }
+    }
+
+    func preference(for model: String) -> DirectResponsePreference? {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed == balancedModel { return .balanced }
+        if trimmed == fastModel { return .fast }
+        if trimmed == deepModel { return .deep }
+        return nil
     }
 }
