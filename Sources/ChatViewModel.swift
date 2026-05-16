@@ -209,16 +209,18 @@ final class ChatViewModel {
             ActivityRecorder.shared.setRunning(activityRecordingEnabled)
         }
     }
-    /// Hover 自动展开聊天窗开关。开启后鼠标悬停灵动岛 500ms → 自动展开聊天窗，
-    /// 聊天窗获得焦点即"锁定"，鼠标离开不收回；windowDidResignKey + 鼠标不在窗口内 → hide；
-    /// Esc / ⌘⇧H 也能主动收回。默认 OFF —— 这是个 opt-in 高频交互，跨窗口 setFrame 风险更高
-    var hoverExpandChatEnabled: Bool {
+    /// Hover 灵动岛 500ms 后的展开行为，三选一（HoverExpandMode）：
+    /// - `.off`：不动（默认）
+    /// - `.embedded`：胶囊本身扩展成迷你聊天框（融进刘海）
+    /// - `.chatWindow`：自动展开主聊天窗（NSWindow，原 PR3 行为，鼠标离开 / Esc / 失焦收回）
+    /// 老用户从旧 `hoverExpandChatEnabled: Bool` 迁移：true → .chatWindow（保留行为），false/未设置 → .off
+    var hoverExpandMode: HoverExpandMode {
         didSet {
-            UserDefaults.standard.set(hoverExpandChatEnabled, forKey: "hoverExpandChatEnabled")
+            UserDefaults.standard.set(hoverExpandMode.rawValue, forKey: "hoverExpandMode")
             NotificationCenter.default.post(
                 name: .init("HermesPetHoverExpandSettingChanged"),
                 object: nil,
-                userInfo: ["enabled": hoverExpandChatEnabled]
+                userInfo: ["mode": hoverExpandMode.rawValue]
             )
         }
     }
@@ -292,10 +294,18 @@ final class ChatViewModel {
         self.clawdDesktopPatrolEnabled = UserDefaults.standard.bool(forKey: "clawdDesktopPatrolEnabled")
         // activityRecordingEnabled 默认 true（首次会弹 Accessibility 权限框，用户可在设置里关）
         self.activityRecordingEnabled = (UserDefaults.standard.object(forKey: "activityRecordingEnabled") as? Bool) ?? true
-        // hoverExpandChatEnabled 默认 **false** —— 自动展开是可选范式，默认关闭以保留传统点击交互。
-        // 用 `object(forKey:) as? Bool` 区分"用户主动设过"vs"全新用户"，新用户默认 false；
-        // 老用户曾经 set 过任何值（含 true）则尊重原值
-        self.hoverExpandChatEnabled = (UserDefaults.standard.object(forKey: "hoverExpandChatEnabled") as? Bool) ?? false
+        // hoverExpandMode 默认 **.off** —— 自动展开是可选范式，默认关闭以保留传统点击交互。
+        // 迁移规则：新 key "hoverExpandMode" 存在则直接用；否则看老 key "hoverExpandChatEnabled"：
+        // - 老 true  → .chatWindow（保留原 PR3 行为，老用户毫无察觉地继续用）
+        // - 老 false / 不存在 → .off（新用户首次见到 = 不动）
+        if let raw = UserDefaults.standard.string(forKey: "hoverExpandMode"),
+           let mode = HoverExpandMode(rawValue: raw) {
+            self.hoverExpandMode = mode
+        } else if let legacy = UserDefaults.standard.object(forKey: "hoverExpandChatEnabled") as? Bool {
+            self.hoverExpandMode = legacy ? .chatWindow : .off
+        } else {
+            self.hoverExpandMode = .off
+        }
         // 早报后端默认 Hermes（自托管/隐私零风险），用户可改
         let savedBriefing = UserDefaults.standard.string(forKey: "morningBriefingBackend")
         self.morningBriefingBackend = AgentMode(rawValue: savedBriefing ?? "") ?? .hermes

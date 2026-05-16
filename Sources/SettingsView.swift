@@ -674,13 +674,40 @@ struct SettingsView: View {
 
             Divider()
 
-            captionToggle(
-                icon: "rectangle.expand.diagonal",
-                iconColor: .indigo,
-                title: "Hover 自动展开聊天窗",
-                caption: "鼠标悬停灵动岛 500ms → 自动展开聊天窗。聊天窗获得焦点即锁定不收回；切到别处 / 按 Esc / ⌘⇧H 主动收回。默认关闭——开启后聊天窗会更频繁地展开",
-                isOn: $viewModel.hoverExpandChatEnabled
-            )
+            // 鼠标悬停灵动岛 500ms 的行为 —— 三选一 Picker（off / embedded / chatWindow）
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "cursorarrow.rays")
+                        .foregroundStyle(.indigo)
+                        .frame(width: 18)
+                    Text("鼠标悬停灵动岛")
+                        .font(.system(size: 13))
+                    Spacer()
+                    Picker("", selection: $viewModel.hoverExpandMode) {
+                        ForEach(HoverExpandMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+                Text(viewModel.hoverExpandMode.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 26)
+                    .fixedSize(horizontal: false, vertical: true)
+                if viewModel.hoverExpandMode == .embedded {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("• 焦点临时给到灵动岛，不会切走当前 app")
+                        Text("• 鼠标离开 500ms 后自动收回（打字途中不收）")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary.opacity(0.75))
+                    .padding(.leading, 26)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
 
             Divider()
 

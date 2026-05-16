@@ -183,7 +183,17 @@ final class MiniReplyCardController {
 
         let cardWidth: CGFloat = 320
         let cardHeight: CGFloat = 150
-        let x = frame.midX - cardWidth / 2
+        // 🔑 横向跟灵动岛对齐 —— 用刘海实际中心（auxiliaryTop* 反推），不是 screen.frame.midX。
+        // MacBook 14"/16" 刘海**不一定在屏幕几何正中**（实测会偏移几 pt），用 screen.midX 算的话
+        // mini card 会跟灵动岛错位 → 用户视觉上感觉"灵动岛左移"（实际是 mini card 不对中）。
+        // 跟 DynamicIslandController.positionWindow 用同一套算法
+        let centerX: CGFloat
+        if let l = screen.auxiliaryTopLeftArea, let r = screen.auxiliaryTopRightArea {
+            centerX = (l.maxX + r.minX) / 2
+        } else {
+            centerX = frame.midX
+        }
+        let x = centerX - cardWidth / 2
         // 灵动岛下方 18pt（idle 4pt 露出 + 14pt 间距）
         let y = frame.maxY - notchHeight - 4 - 14 - cardHeight
 
@@ -229,16 +239,16 @@ struct MiniReplyCardView: View {
         ZStack {
             if state.isVisible {
                 card
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .top)
-                            .combined(with: .opacity)
-                            .combined(with: .scale(scale: 0.95, anchor: .top)),
-                        removal: .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-                    ))
+                    // 跟灵动岛 task finished 时其他卡片完全统一的 transition：opacity + scale 0.96，
+                    // anchor:.top 让卡片"从灵动岛下方长出来"。去掉之前的 .move(edge:.top) —— 那个 150pt
+                    // 的从屏顶下滑动距离跟灵动岛原地切换不匹配，用户看到"一层一层"的分裂动画感
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .animation(.spring(response: 0.36, dampingFraction: 0.82), value: state.isVisible)
+        // AnimTok.smooth（0.35/0.85）—— 跟灵动岛 task finished 时的 spring(0.35/0.85) 完全同步，
+        // 两个动画一气呵成。之前 bouncy 0.42/0.78 比灵动岛慢 70ms 还更弹 → 视觉脱节
+        .animation(AnimTok.smooth, value: state.isVisible)
     }
 
     private var card: some View {

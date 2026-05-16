@@ -68,6 +68,7 @@
 ---
 
 ## [P0-Bug] 🔥 优先修的 Bug
+- [x] **CPU 100% 卡死全面修复**（2026-05-16）—— 10 人审查团队 R1+R2 + lead 实证 sample 文件，根因锁定 ClawdWalk 30Hz Timer→setFrameOrigin→跨进程 XPC fence + AppDelegate 启动 16 服务对称率 31%。一次性修 6 处：(1) ClawdWalkOverlay 加 `setWindowOriginIfNeeded` helper，5 处 setFrameOrigin 改用 deltaPos<0.5pt 跳帧（保 30Hz 视觉、消 ~60% 跨进程 XPC fence）；(2) ClawdWalk Timer closure `Task { @MainActor in self?.tick() }` 改 `MainActor.assumeIsolated { self?.tick() }`（省 30 Task/秒 spawn）；(3) AppDelegate.applicationWillTerminate 补 iconTimer.invalidate / MouseTracking.stop / IdleStateTracker.stop / 2 个 removeObserver；(4) ChatViewModel.checkConnection 4 case 合并成单个 connectionCheckTask 句柄 + [weak self]，每次调用前 cancel 上次（消 5s 轮询堆积）；(5) MarkdownTextView parseBlocks 加 NSCache by content（countLimit=100），消流式 30fps 全文 re-parse；(6) APIClient.watchdog sleep 后立即 `if Task.isCancelled { return }`，避免 sleep 期间被 cancel 还继续 await。Sample 实证 `_setFrameCommon` 主线程帧从 26→10（-62%）+ WMClient XPC 3→1（-33%）。R1 同时证伪 5 个 false alarm（A#2 layout cycle 回归、A#6 ForEach diff、C#2 errorMessage dead state、D#3 Key 隔离、A#1 MouseTracking idle 主因）
 - [x] **errorMessage 没显示到 UI** —— 加了顶部 ErrorToast，3.5s 自动消失，可手动 ×
 - [x] **截图前隐藏窗口的 250ms 硬编码** —— sleep 缩到 50ms（alphaValue=0 是即时变化，CALayer 一帧 commit + 余量足够），慢电脑也更稳
 - [x] **GlobalHotkey 注册失败检测** —— RegisterEventHotKey 返回值检查，被占用时灵动岛弹通知告知具体哪个热键失败
