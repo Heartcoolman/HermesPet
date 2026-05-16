@@ -1084,7 +1084,8 @@ struct SettingsView: View {
                 }
                 VStack(alignment: .leading, spacing: 3) {
                     Text("HermesPet").font(.system(size: 16, weight: .semibold))
-                    Text("v1.0").font(.system(size: 12, design: .monospaced))
+                    Text("v\(UpdateChecker.shared.currentVersion)")
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundStyle(.secondary)
                     Text("macOS 顶部刘海桌宠 · AI 聊天客户端")
                         .font(.caption)
@@ -1095,6 +1096,10 @@ struct SettingsView: View {
 
             Divider()
 
+            updateSection
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(HotkeyAction.allCases) { action in
                     hotkeyRow(action)
@@ -1102,7 +1107,166 @@ struct SettingsView: View {
                 aboutRow(icon: "folder.fill", label: "存储位置", value: "~/.hermespet/")
             }
             .id(hotkeyRefreshID)
+
+            Divider()
+
+            creditsSection
         }
+    }
+
+    /// 作者署名 + 社区贡献者致谢。点击贡献者可跳到对应 GitHub 主页。
+    private var creditsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text("作者")
+                    .font(.system(size: 12))
+                Spacer()
+                Link("Basion", destination: URL(string: "https://github.com/basionwang-bot")!)
+                    .font(.system(size: 12, weight: .medium))
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "heart.fill")
+                    .foregroundStyle(.pink.opacity(0.85))
+                    .frame(width: 16)
+                Text("社区贡献者")
+                    .font(.system(size: 12))
+                Spacer()
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Link("Heartcoolman",
+                             destination: URL(string: "https://github.com/Heartcoolman")!)
+                        Text("·").foregroundStyle(.secondary)
+                        Link("simpledavid",
+                             destination: URL(string: "https://github.com/simpledavid")!)
+                        Text("·").foregroundStyle(.secondary)
+                        Link("CoimgRain",
+                             destination: URL(string: "https://github.com/CoimgRain")!)
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    Link("查看全部贡献者",
+                         destination: URL(string: "https://github.com/basionwang-bot/HermesPet/graphs/contributors")!)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: 10) {
+                Image(systemName: "star.bubble.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16)
+                Text("代码仓库")
+                    .font(.system(size: 12))
+                Spacer()
+                Link("GitHub", destination: URL(string: "https://github.com/basionwang-bot/HermesPet")!)
+                    .font(.system(size: 12))
+            }
+
+            Text("感谢所有提交 issue / PR 的朋友。如果这个项目对你有用，欢迎在 GitHub 给个 Star ⭐️")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .padding(.top, 4)
+        }
+    }
+
+    /// 更新检查区。GitHub Release API 拉最新 tag 对比 + 一键下载 DMG 引导安装
+    @ViewBuilder
+    private var updateSection: some View {
+        let checker = UpdateChecker.shared
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: checker.hasUpdate ? "arrow.down.circle.fill" : "checkmark.circle.fill")
+                    .foregroundStyle(checker.hasUpdate ? .orange : .green)
+                    .frame(width: 16)
+                if checker.hasUpdate, let latest = checker.latestVersion {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("有新版本 v\(latest) 可用")
+                            .font(.system(size: 13, weight: .medium))
+                        Text("当前 v\(checker.currentVersion)")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("已是最新版本")
+                            .font(.system(size: 13))
+                        if let at = checker.lastCheckedAt {
+                            Text("最近检查：\(relativeTime(from: at))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Spacer()
+                if checker.isDownloading {
+                    HStack(spacing: 6) {
+                        ProgressView(value: checker.downloadProgress)
+                            .frame(width: 80)
+                        Text("\(Int(checker.downloadProgress * 100))%")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                } else if checker.hasUpdate {
+                    Button {
+                        Task { await checker.downloadAndInstall() }
+                    } label: {
+                        Label("下载并安装", systemImage: "arrow.down.app.fill")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else {
+                    Button {
+                        Task { await checker.check(silently: false) }
+                    } label: {
+                        Label(checker.isChecking ? "检查中..." : "检查更新",
+                              systemImage: "arrow.clockwise")
+                            .font(.system(size: 12))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(checker.isChecking)
+                }
+            }
+
+            if let err = checker.lastError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.leading, 26)
+            }
+
+            if checker.hasUpdate, !checker.latestNotes.isEmpty {
+                DisclosureGroup {
+                    Text(checker.latestNotes)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 4)
+                } label: {
+                    Text("更新内容")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.leading, 26)
+            }
+        }
+    }
+
+    /// "刚刚" / "5 分钟前" / "2 小时前" / "昨天" 相对时间
+    private func relativeTime(from date: Date) -> String {
+        let f = RelativeDateTimeFormatter()
+        f.locale = Locale(identifier: "zh_CN")
+        f.unitsStyle = .full
+        return f.localizedString(for: date, relativeTo: Date())
     }
 
     private func hotkeyRow(_ action: HotkeyAction) -> some View {

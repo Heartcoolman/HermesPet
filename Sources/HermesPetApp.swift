@@ -54,6 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 监听随机端口，OpenCodeConfigGenerator 启动后把所有 provider baseURL 改写到 proxy
         ReasoningProxy.shared.start()
 
+        // 自动更新检查：启动 60s 后调一次 GitHub Release API，之后每 24h 一次。
+        // 有新版 → 设置面板「关于」区 + 菜单栏出 🔵 提示，用户点击一键下载 + 引导挂载
+        UpdateChecker.shared.start()
+
         let vm = ChatViewModel()
         viewModel = vm
 
@@ -266,6 +270,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        // 检查更新：有新版时菜单项标题带🔵小圆点提示
+        let checker = UpdateChecker.shared
+        let updateTitle: String
+        if checker.hasUpdate, let v = checker.latestVersion {
+            updateTitle = "🔵 有新版 v\(v) · 点击查看"
+        } else {
+            updateTitle = "检查更新（当前 v\(checker.currentVersion)）"
+        }
+        let updateItem = NSMenuItem(title: updateTitle, action: #selector(menuCheckUpdate), keyEquivalent: "")
+        updateItem.target = self
+        menu.addItem(updateItem)
+
+        menu.addItem(.separator())
+
         let quitItem = NSMenuItem(title: "退出 Hermes 桌宠", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -286,6 +304,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func menuExportPins() {
         PinCardController.shared.exportAllPinsToMarkdown()
+    }
+
+    /// 菜单栏「检查更新」点击：
+    /// - 有新版 → 直接调 downloadAndInstall 一键流程
+    /// - 没新版 / 没检查过 → 触发 silently=false 检查，结果通过 alert 反馈
+    @objc private func menuCheckUpdate() {
+        let checker = UpdateChecker.shared
+        if checker.hasUpdate {
+            Task { @MainActor in await checker.downloadAndInstall() }
+        } else {
+            Task { @MainActor in
+                await checker.check(silently: false)
+                if checker.hasUpdate {
+                    // 检查后发现有新版 → 直接弹窗确认是否下载
+                    let alert = NSAlert()
+                    alert.messageText = "发现新版 v\(checker.latestVersion ?? "")"
+                    alert.informativeText = "当前 v\(checker.currentVersion)。要现在下载并安装吗？"
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "下载并安装")
+                    alert.addButton(withTitle: "稍后")
+                    if alert.runModal() == .alertFirstButtonReturn {
+                        await checker.downloadAndInstall()
+                    }
+                } else {
+                    let alert = NSAlert()
+                    alert.messageText = "已是最新版本"
+                    alert.informativeText = "当前 v\(checker.currentVersion) 是最新的 🎉"
+                    if let err = checker.lastError {
+                        alert.informativeText = err
+                        alert.alertStyle = .warning
+                    }
+                    alert.addButton(withTitle: "好的")
+                    alert.runModal()
+                }
+            }
+        }
     }
 
     @objc private func quitApp() {

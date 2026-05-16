@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="HermesPet"
 DISPLAY_NAME="Hermes 桌宠"
-VERSION="1.2.0"
+VERSION="1.2.1"
 BUILD_DIR="$SCRIPT_DIR/.build"
 DIST_DIR="$SCRIPT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -132,14 +132,22 @@ cat > "$STAGING_DIR/⚠️ 第一次打开请看我.txt" <<'EOF'
 授权完任一权限后，建议完全退出 Hermes 桌宠（菜单栏右键 → 退出）
 再重新打开一次，让新权限对进程生效。
 
-【v1.2.0 重磅升级 · 在线 AI 模式变 agent 了】
+【v1.2.1 微更新内容】
 
-  现在「在线 AI」模式不只是聊天 —— 能让 AI 真的读你的本地文件、
-  跑命令、联网搜索、看图，跟 Claude Code / Codex 同档能力，
-  **完全不需要装任何外部命令行工具**。
+  · 在线 AI 模式新增云朵小精灵 ☁️ —— 灵动岛左耳像素动画 + 桌面漫步
+  · 灵动岛 hover 改造：触发区严格收紧到硬件刘海几何，水滴润下动效
+  · 桌宠双击不再切换 AI 模式（行为更符合直觉）
+  · 设置面板「桌宠」区合并 Clawd / 云朵统一管理
+  · 内置自动更新检查：菜单栏 + 设置面板能看到新版本提示，一键下载
+  · 设置「关于」加作者署名 + 社区贡献者致谢
 
-  原理：HermesPet 内置了 opencode (MIT 开源 agent runtime)
-  约 100MB，所以 DMG 比之前大了不少。一次装上免后顾之忧。
+【v1.2.0 沿用 · 在线 AI 是 agent 不只是聊天】
+
+  内置 opencode (MIT 开源 agent runtime) 让「在线 AI」模式能真的读
+  你的本地文件、跑命令、联网搜索、看图，跟 Claude Code / Codex
+  同档能力，**完全不需要装任何外部命令行工具**。
+
+  约 100MB，所以 DMG 比 v1.1 大了不少，一次装上免后顾之忧。
 
 【最快上手 · 不需要装任何命令行工具】
 
