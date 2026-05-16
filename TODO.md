@@ -59,6 +59,7 @@
 ---
 
 ## [P0-Bug] 🔥 优先修的 Bug
+- [x] **在线 AI 拖入文档显示「(没有响应)」(v1.2.2 hotfix)** —— 根因：opencode 1.15.1 复用 session 时偶尔产出 token 但没 yield `type=text` part，HermesPet 累计 fullContent 为空兜底 "(没有响应)"。修复：(1) `EventTypeCounter` 统计每次 spawn 的 event 类型分布并写入 `~/.hermespet/opencode-debug.log` 的 `events=[...]` 段，下次重现一眼定位；(2) `handleEvent` 兼容 `text` / `assistant_text` / `assistant_message` / `text_delta` / `message` 5 种 part 类型，未知 type 也兜底抽 `text`/`content`/`delta` 字段；(3) 检测到 stdout 非空但没 yield 过文字时自动 `clearSession(for:)` + 报 `runtimeFailure("模型没产出正文（只跑了 X）。已自动重置对话上下文，可以直接重发")`，从模糊 "(没有响应)" 升级成可操作错误
 - [x] **errorMessage 没显示到 UI** —— 加了顶部 ErrorToast，3.5s 自动消失，可手动 ×
 - [x] **截图前隐藏窗口的 250ms 硬编码** —— sleep 缩到 50ms（alphaValue=0 是即时变化，CALayer 一帧 commit + 余量足够），慢电脑也更稳
 - [x] **GlobalHotkey 注册失败检测** —— RegisterEventHotKey 返回值检查，被占用时灵动岛弹通知告知具体哪个热键失败

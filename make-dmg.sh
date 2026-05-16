@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 
 APP_NAME="HermesPet"
 DISPLAY_NAME="Hermes 桌宠"
-VERSION="1.2.1"
+VERSION="1.2.2"
 BUILD_DIR="$SCRIPT_DIR/.build"
 DIST_DIR="$SCRIPT_DIR/dist"
 APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
@@ -132,7 +132,15 @@ cat > "$STAGING_DIR/⚠️ 第一次打开请看我.txt" <<'EOF'
 授权完任一权限后，建议完全退出 Hermes 桌宠（菜单栏右键 → 退出）
 再重新打开一次，让新权限对进程生效。
 
-【v1.2.1 微更新内容】
+【v1.2.2 修复内容】
+
+  · 修复在线 AI 拖入文档偶尔显示「(没有响应)」的问题
+    —— 模型只跑 reasoning 没产正文时，自动重置上下文 + 给出友好提示
+  · OpenCode 事件解析兼容 5 种 part 类型，未来 opencode 升级也不掉链
+  · 排查工具增强：~/.hermespet/opencode-debug.log 现在带 events=[...]
+    分布，下次出问题一眼定位是哪个环节断的
+
+【v1.2.1 沿用】
 
   · 在线 AI 模式新增云朵小精灵 ☁️ —— 灵动岛左耳像素动画 + 桌面漫步
   · 灵动岛 hover 改造：触发区严格收紧到硬件刘海几何，水滴润下动效

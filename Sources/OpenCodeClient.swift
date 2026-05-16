@@ -187,6 +187,7 @@ final class OpenCodeClient: @unchecked Sendable {
         let buffer = LineBuffer()
         let stderrBuffer = LineBuffer()
         let stdoutCounter = ByteCounter()
+        let typeCounter = EventTypeCounter()
         let streamDone = AtomicFlag()   // 防 EOF + terminationHandler 重复 finish
         let convID = conversationID
 
@@ -202,13 +203,16 @@ final class OpenCodeClient: @unchecked Sendable {
                           let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
                         continue
                     }
-                    self.handleEvent(json, conversationID: convID, continuation: continuation)
+                    if let t = json["type"] as? String { typeCounter.bump(t) }
+                    let yielded = self.handleEvent(json, conversationID: convID, continuation: continuation)
+                    if yielded { typeCounter.markTextYielded() }
                 }
             }
             let stdoutBytes = stdoutCounter.value
             let stderrText = stderrBuffer.drainAll()
+            let eventSummary = typeCounter.summary.isEmpty ? "(no events)" : typeCounter.summary
             // 直接写 stderr，bypass macOS 26 对 NSLog 的压制，让 `log show` / Console 都能看到
-            let logLine = "[OpenCode] finish prompt=\"\(promptForLog.prefix(60))\" stdout_bytes=\(stdoutBytes) stderr=\(stderrText.isEmpty ? "(empty)" : String(stderrText.prefix(400)))\n"
+            let logLine = "[OpenCode] finish prompt=\"\(promptForLog.prefix(60))\" stdout_bytes=\(stdoutBytes) events=[\(eventSummary)] stderr=\(stderrText.isEmpty ? "(empty)" : String(stderrText.prefix(400)))\n"
             FileHandle.standardError.write(logLine.data(using: .utf8) ?? Data())
             // 把诊断也写到 ~/.hermespet/opencode-debug.log 文件，方便事后翻
             let home = NSHomeDirectory()
@@ -229,6 +233,15 @@ final class OpenCodeClient: @unchecked Sendable {
                     ? "opencode 没有任何输出（模型不可用或网络不通）"
                     : "opencode 报错: \(stderrText.prefix(300))"
                 continuation.finish(throwing: OpenCodeClientError.runtimeFailure(detail))
+            } else if !typeCounter.didYieldText {
+                // stdout 非空（11906 字节那种）但 model 一句正文都没产出 ——
+                // 通常是 reasoning 阶段被 disconnect / context 太长被模型空回 / tool 调用后没回正文。
+                // 自动失效该对话的 session（让用户「重发」时重开 session，避开污染状态）
+                if let self {
+                    self.clearSession(for: convID)
+                }
+                let hint = "模型没产出正文（只跑了 \(eventSummary)）。已自动重置对话上下文，可以直接「重发」。"
+                continuation.finish(throwing: OpenCodeClientError.runtimeFailure(hint))
             } else {
                 continuation.finish()
             }
@@ -251,7 +264,9 @@ final class OpenCodeClient: @unchecked Sendable {
                       let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
                     continue
                 }
-                self.handleEvent(json, conversationID: convID, continuation: continuation)
+                if let t = json["type"] as? String { typeCounter.bump(t) }
+                let yielded = self.handleEvent(json, conversationID: convID, continuation: continuation)
+                if yielded { typeCounter.markTextYielded() }
             }
         }
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
@@ -319,30 +334,45 @@ final class OpenCodeClient: @unchecked Sendable {
     /// - `text` 直接 yield 给 continuation（流式累积渲染）
     /// - `tool_use` 转换成 HermesPetToolStarted/Ended 通知 → 灵动岛工具卡 + 桌宠精灵
     /// - `step_start` 抓 sessionID 存映射
+    ///
+    /// 返回值：是否 yield 过文字（用于上层判断 stdout 非空但模型没产出正文）
+    @discardableResult
     private func handleEvent(
         _ event: [String: Any],
         conversationID: String,
         continuation: AsyncThrowingStream<String, Error>.Continuation
-    ) {
+    ) -> Bool {
         // 抓 sessionID（首次出现时存入映射）
         if let sid = event["sessionID"] as? String, !sid.isEmpty {
             stashSessionID(sid, for: conversationID)
         }
 
-        guard let type = event["type"] as? String else { return }
+        guard let type = event["type"] as? String else { return false }
         let part = event["part"] as? [String: Any]
 
         switch type {
-        case "text":
+        case "text", "assistant_text", "assistant_message", "text_delta", "message":
+            // 主路径 + 兜底新格式：未来 opencode 可能改成 assistant_text / text_delta 等命名
             if let text = part?["text"] as? String, !text.isEmpty {
-                continuation.yield(text)
+                continuation.yield(text); return true
+            } else if let content = part?["content"] as? String, !content.isEmpty {
+                continuation.yield(content); return true
+            } else if let delta = part?["delta"] as? String, !delta.isEmpty {
+                continuation.yield(delta); return true
             }
+            return false
 
         case "tool_use":
             handleToolEvent(part: part)
+            return false
 
         default:
-            break
+            // 未知 type 兜底：如果 part 里有 text/content 字段也尝试当文本输出，
+            // 避免 opencode 改格式后用户直接显示「没有响应」
+            if let text = part?["text"] as? String, !text.isEmpty {
+                continuation.yield(text); return true
+            }
+            return false
         }
     }
 
@@ -513,6 +543,34 @@ final class ByteCounter: @unchecked Sendable {
     var value: Int {
         lock.lock(); defer { lock.unlock() }
         return _value
+    }
+}
+
+/// 按 event type 统计出现次数。诊断「stdout 非空但没拿到 text」问题用：
+/// 把整次 spawn 的 event type 序列汇总写到 opencode-debug.log，
+/// 出现「(没有响应)」时可以一眼看出是不是 model 只跑了 tool_use / step_finish 没 text
+final class EventTypeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [String: Int] = [:]
+    private var _textYielded = false
+    func bump(_ type: String) {
+        lock.lock(); counts[type, default: 0] += 1; lock.unlock()
+    }
+    /// handleEvent 实际 yield 了文字（含 fallback 抽 part.text/.content/.delta）后调
+    func markTextYielded() {
+        lock.lock(); _textYielded = true; lock.unlock()
+    }
+    /// 这一次 spawn 是否真的产出过正文 —— 用于诊断「stdout 非空但内容空」
+    var didYieldText: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _textYielded
+    }
+    /// `text×3, tool_use×2, step_start×4` 这种紧凑格式
+    var summary: String {
+        lock.lock(); defer { lock.unlock() }
+        return counts.sorted { $0.key < $1.key }
+            .map { "\($0.key)×\($0.value)" }
+            .joined(separator: ", ")
     }
 }
 
