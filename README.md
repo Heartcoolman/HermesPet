@@ -6,6 +6,7 @@
 
 **让 AI 住在你 MacBook 的刘海里 · 零依赖开箱即用 · 多引擎并行的桌面 AI 伴侣**
 
+[![Website](https://img.shields.io/badge/官网-hermespet.cc-7B68EE?logo=safari&logoColor=white)](https://hermespet.cc)
 [![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![Latest Release](https://img.shields.io/github/v/release/basionwang-bot/HermesPet?label=最新版&color=success&logo=github)](https://github.com/basionwang-bot/HermesPet/releases/latest)
@@ -15,6 +16,8 @@
 🌍 **中文** · [English](./README.en.md)
 
 ### 📦 [点这里下载最新版本 DMG →](https://github.com/basionwang-bot/HermesPet/releases/latest)
+
+### 🌐 [访问项目主页 · hermespet.cc →](https://hermespet.cc)
 
 直接拿 macOS DMG · 双击安装 · 选服务商粘 API Key 就能用，**不依赖任何命令行工具**
 

@@ -6,6 +6,7 @@
 
 **An AI chat client that lives under your MacBook's notch · Zero-dependency setup · Multi-engine parallel desktop AI companion**
 
+[![Website](https://img.shields.io/badge/website-hermespet.cc-7B68EE?logo=safari&logoColor=white)](https://hermespet.cc)
 [![macOS](https://img.shields.io/badge/macOS-14.0+-000000?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?logo=swift&logoColor=white)](https://www.swift.org/)
 [![Latest Release](https://img.shields.io/github/v/release/basionwang-bot/HermesPet?label=latest&color=success&logo=github)](https://github.com/basionwang-bot/HermesPet/releases/latest)
@@ -15,6 +16,8 @@
 🌍 [中文](./README.md) · **English**
 
 ### 📦 [Download the latest DMG →](https://github.com/basionwang-bot/HermesPet/releases/latest)
+
+### 🌐 [Visit the project site · hermespet.cc →](https://hermespet.cc)
 
 Grab the macOS DMG · double-click to install · pick a provider, paste an API key — **no command-line tools required**
 
