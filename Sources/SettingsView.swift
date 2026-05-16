@@ -674,6 +674,16 @@ struct SettingsView: View {
 
             Divider()
 
+            captionToggle(
+                icon: "rectangle.expand.diagonal",
+                iconColor: .indigo,
+                title: "Hover 自动展开聊天窗",
+                caption: "鼠标悬停灵动岛 500ms → 自动展开聊天窗。聊天窗获得焦点即锁定不收回；切到别处 / 按 Esc / ⌘⇧H 主动收回。默认关闭——开启后聊天窗会更频繁地展开",
+                isOn: $viewModel.hoverExpandChatEnabled
+            )
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 8) {
                 Label("交互", systemImage: "hand.tap")
                     .font(.system(size: 12, weight: .medium))

@@ -237,6 +237,19 @@ struct DynamicIslandPillView: View {
     // MARK: - o) 5 段音量条实时电平
     @State private var voiceLevel: Float = 0
 
+    // MARK: - hoverCard 增强：最近 AI 回复预览 + 未读后台对话数
+    /// 由 ChatViewModel.broadcastHoverContext 通过 HermesPetHoverContextChanged 推送
+    @State private var latestAssistantPreview: String = ""
+    @State private var unreadConversationCount: Int = 0
+
+    // MARK: - hover 展开聊天窗（PR3）
+    /// 设置开关：hover 500ms 后是否自动展开聊天窗。从 ChatViewModel.hoverExpandChatEnabled 同步
+    /// 默认 false：跟 ChatViewModel.init 的 fallback 一致。`object(forKey:) as? Bool` 区分
+    /// "用户主动 set 过任何值（含 true）" vs "全新用户从未设置"，新用户默认走传统点击交互
+    @State private var hoverExpandEnabled: Bool = (UserDefaults.standard.object(forKey: "hoverExpandChatEnabled") as? Bool) ?? false
+    /// 500ms 防误触 task —— hover 进入立刻启动；hover 离开 + 未到 500ms → cancel
+    @State private var hoverExpandTask: Task<Void, Never>? = nil
+
     /// 通知态 / hover / 工具调用中 / diff 摘要中 / 错误态都让胶囊"展开"
     private var isExpanded: Bool {
         isHovering || isShowingNotification
@@ -288,6 +301,7 @@ struct DynamicIslandPillView: View {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
                 isHovering = hovering
             }
+            handleHoverForExpand(hovering: hovering)
         }
         .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetScreenshotAdded"))) { note in
             // 取消上次未结束的通知 task，重新计时
@@ -504,9 +518,51 @@ struct DynamicIslandPillView: View {
                 voiceLevel = lvl
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetHoverContextChanged"))) { note in
+            if let p = note.userInfo?["preview"] as? String { latestAssistantPreview = p }
+            if let c = note.userInfo?["unreadCount"] as? Int { unreadConversationCount = c }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetHoverExpandSettingChanged"))) { note in
+            let enabled = (note.userInfo?["enabled"] as? Bool) ?? false
+            hoverExpandEnabled = enabled
+            if !enabled {
+                // 关掉开关时清掉 pending task，避免最后一次 hover 500ms 仍触发展开
+                hoverExpandTask?.cancel()
+                hoverExpandTask = nil
+            }
+        }
         .onAppear {
             let hasKey = !(UserDefaults.standard.string(forKey: "apiKey") ?? "").isEmpty
             status = hasKey ? .connected : .unknown
+        }
+    }
+
+    /// PR3: hover 500ms 防误触后请求展开聊天窗。
+    /// 仅在 hoverExpandEnabled 开启时生效；hover 离开未到 500ms 取消 task。
+    /// 实际展开由 AppDelegate 订阅 HermesPetHoverExpandRequested 触发（chatWindow.show(hoverMode: true)）
+    private func handleHoverForExpand(hovering: Bool) {
+        guard hoverExpandEnabled else {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
+            return
+        }
+        if hovering {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+                // 拖放保护：鼠标左键按下 = 用户在拖东西（拖 Finder 文件 / 桌面图标 / 任意 OS 拖放对象），
+                // 此时弹出聊天窗会让 NSDraggingSession 找不到正确 drop target，
+                // 导致 Finder 拖放状态机卡死（桌面文件后续无法拖动，需 killall Finder 才能恢复）
+                if NSEvent.pressedMouseButtons & 1 != 0 { return }
+                NotificationCenter.default.post(
+                    name: .init("HermesPetHoverExpandRequested"),
+                    object: nil
+                )
+            }
+        } else {
+            hoverExpandTask?.cancel()
+            hoverExpandTask = nil
         }
     }
 
@@ -675,7 +731,10 @@ struct DynamicIslandPillView: View {
         .transition(.opacity.combined(with: .scale(scale: 0.94)))
     }
 
-    /// hover 卡片（鼠标悬停时显示 mode + 状态点 + 模型名）
+    /// hover 卡片（鼠标悬停时显示 mode + 状态点 + 模型名 + 上次 AI 回复预览 + 未读徽章）。
+    /// 关键约束：currentHeight 必须保持 idle vs hover 两档（不能因为 preview 多让出空间），
+    /// 否则 SwiftUI 反推 NSHostingView.updateAnimatedWindowSize → 嵌套 layout 必崩
+    /// （CLAUDE.md 决策 #5 / #7 / issue #3 反复踩过）。preview 用 overlay 不参与 layout
     private var hoverCard: some View {
         VStack(spacing: 0) {
             Color.clear.frame(height: notchHeight)
@@ -690,8 +749,42 @@ struct DynamicIslandPillView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white)
                     .tracking(0.3)
+                if unreadConversationCount > 0 {
+                    Text("·\(unreadConversationCount) 未读")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.orange.opacity(0.20)))
+                }
             }
             .frame(maxHeight: .infinity)
+        }
+        .overlay(alignment: .bottom) {
+            // preview overlay —— 不参与 SwiftUI layout（关键！防嵌套 layout 崩），
+            // 自带黑底胶囊作为视觉容器，offset 推到 hoverCard 下方约 24pt 位置
+            if !latestAssistantPreview.isEmpty {
+                Text(latestAssistantPreview)
+                    .font(.system(size: 10, weight: .regular))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.black.opacity(0.85))
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
+                    )
+                    .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: currentWidth - 20)
+                    .offset(y: 22)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .transition(.opacity.combined(with: .scale(scale: 0.94)))
     }
