@@ -1184,6 +1184,9 @@ private struct CLIAdvancedSection: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                // 撑满 DisclosureGroup 内容宽度，4 段等分；否则 NSSegmentedControl 默认 .fit
+                // 分布会让选中态 segment 变宽，整体宽度跟着变，VStack 居中渲染时位置就跳了
+                .frame(maxWidth: .infinity)
 
                 Text(captionFor(override))
                     .font(.caption)
