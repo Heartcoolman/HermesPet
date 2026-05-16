@@ -2,6 +2,8 @@
 
 <img src="docs/banner.png" alt="HermesPet — 你的 AI 桌面伙伴，陪你工作，懂你所想" width="100%" />
 
+<img src="docs/app-icon.png" alt="HermesPet App Icon" width="128" height="128" />
+
 # HermesPet 🐻‍❄️
 
 **让 AI 住在你 MacBook 的刘海里 · 零依赖开箱即用 · 多引擎并行的桌面 AI 伴侣**
