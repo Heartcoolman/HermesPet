@@ -59,7 +59,8 @@ final class CodexClient: @unchecked Sendable {
     /// Codex thread_id：第一次把完整历史发给 Codex，拿到 `thread.started.thread_id` 后持久化；
     /// 后续只把最新用户输入发给 `resume`，不再每轮冷启动 + 重传全量历史。
     func streamCompletion(messages: [ChatMessage],
-                          conversationID: String? = nil) -> AsyncThrowingStream<String, Error> {
+                          conversationID: String? = nil,
+                          tier: CLIModelTier = .balanced) -> AsyncThrowingStream<String, Error> {
         let existingSessionID = sessionID(for: conversationID)
         let prompt = buildPrompt(messages: messages, isResume: existingSessionID != nil)
         let inputImages = collectInputImagePaths(from: messages)
@@ -67,7 +68,8 @@ final class CodexClient: @unchecked Sendable {
             prompt: prompt,
             imageFiles: inputImages,
             conversationID: conversationID,
-            sessionID: existingSessionID
+            sessionID: existingSessionID,
+            tier: tier
         )
     }
 
@@ -179,10 +181,13 @@ final class CodexClient: @unchecked Sendable {
 
     /// 底层 spawn codex exec --json 的流式实现。
     /// imageFiles：通过 `-i <path>` 传给 codex 让它视觉识别（最后一条 user 消息的附图）
+    /// `tier` 仅在新建 thread（非 resume）时影响 `--model`；resume 不重传 model，
+    /// 让同一个 Codex thread 保持初始模型一致，避免「同一对话 model 跳变」的诡异行为。
     private func streamRaw(prompt: String,
                            imageFiles: [String] = [],
                            conversationID: String?,
-                           sessionID: String?) -> AsyncThrowingStream<String, Error> {
+                           sessionID: String?,
+                           tier: CLIModelTier = .balanced) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             // spawn 前快照 codex 的默认图片目录
             let codexImageDir = (NSHomeDirectory() as NSString)
@@ -207,6 +212,12 @@ final class CodexClient: @unchecked Sendable {
                     "--skip-git-repo-check",
                     "--dangerously-bypass-approvals-and-sandbox"
                 ]
+                // 自动档位：fast=mini / deep=codex；balanced 时 tier.codexModel == nil 不传 --model
+                // 注意必须放在 `-i` 之前（`-i` 是 clap greedy 会吞后续参数）
+                if let model = tier.codexModel {
+                    args.append("--model")
+                    args.append(model)
+                }
             }
             // 每张输入图加一个 -i <path>，让 codex 视觉识别
             for path in imageFiles {

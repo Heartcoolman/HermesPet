@@ -550,8 +550,12 @@ final class ChatViewModel {
         switch mode {
         case .hermes:     return apiClient.streamCompletion(messages: messages)
         case .directAPI:  return directClient.streamCompletion(messages: messages)
-        case .claudeCode: return claudeClient.streamCompletion(messages: messages)
-        case .codex:      return codexClient.streamCompletion(messages: messages)
+        case .claudeCode:
+            let tier = CLIModelTier.decide(messages: messages)
+            return claudeClient.streamCompletion(messages: messages, tier: tier)
+        case .codex:
+            let tier = CLIModelTier.decide(messages: messages)
+            return codexClient.streamCompletion(messages: messages, tier: tier)
         }
     }
 
@@ -701,11 +705,15 @@ final class ChatViewModel {
                 case .claudeCode:
                     // 把完整对话历史（含跟其他 AI 的对话）传给 Claude，
                     // 实现跨 AI 共享记忆
-                    stream = claudeClient.streamCompletion(messages: apiMessages)
+                    // tier 由 ModelTier.decide 按附件/关键词/长度内部判定，UI 不暴露
+                    let claudeTier = CLIModelTier.decide(messages: apiMessages)
+                    stream = claudeClient.streamCompletion(messages: apiMessages, tier: claudeTier)
                 case .codex:
+                    let codexTier = CLIModelTier.decide(messages: apiMessages)
                     stream = codexClient.streamCompletion(
                         messages: apiMessages,
-                        conversationID: targetConversationID
+                        conversationID: targetConversationID,
+                        tier: codexTier
                     )
                 }
 
