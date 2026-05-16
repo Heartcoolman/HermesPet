@@ -516,6 +516,9 @@ struct SettingsView: View {
             // 当前检测到的路径 + 重新检测按钮
             cliDetectionRow(mode: mode, tint: tint)
 
+            // 高级区：默认折叠，老手在此锁定档位 override 自动判定。新手看不到任何模型设置
+            CLIAdvancedSection(mode: mode, tint: tint)
+
             // 安装指南链接
             HStack(spacing: 4) {
                 Image(systemName: "arrow.up.right.square")
@@ -1143,6 +1146,80 @@ struct SettingsView: View {
             }
         }
         return error.localizedDescription
+    }
+}
+
+// MARK: - CLI 模式「高级」区 override
+
+/// 嵌在 `cliConfigCard` 末尾的折叠卡片 —— 默认折叠（新手零干扰），展开后可锁定档位。
+///
+/// 设计原则：
+/// - **默认折叠**：新手永远看不到模型设置
+/// - **默认值 = 自动**：即便展开也跟不展开行为一致
+/// - **CLI 自带默认作为「平衡」**：选「平衡」≈ 选「自动」+ 中等长度输入，给老手一个明确的"锁定 CLI 默认"心智
+private struct CLIAdvancedSection: View {
+    let mode: AgentMode
+    let tint: Color
+
+    @State private var expanded: Bool = false
+    /// AppStorage key 由 ModelTier.overrideKey(for:) 决定，跟 ChatViewModel 读的同一个 key
+    @AppStorage private var override: String
+
+    init(mode: AgentMode, tint: Color) {
+        self.mode = mode
+        self.tint = tint
+        // overrideKey 对 .claudeCode / .codex 必定非 nil；其他 mode 不会渲染这个 View
+        let key = CLIModelTier.overrideKey(for: mode) ?? "unusedCLIModelTierOverride"
+        self._override = AppStorage(wrappedValue: "", key)
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("", selection: $override) {
+                    Text("自动").tag("")
+                    ForEach([CLIModelTier.fast, .balanced, .deep], id: \.rawValue) { tier in
+                        Text(tier.displayLabel).tag(tier.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text(captionFor(override))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 6)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text("高级")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                if !override.isEmpty {
+                    // 提示老手当前有 override 生效（折叠时也可见）
+                    Text("·锁定")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tint)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.06))
+        )
+    }
+
+    private func captionFor(_ raw: String) -> String {
+        if raw.isEmpty {
+            return "根据当前对话自动选档：附件 / 复杂任务 → 深度；短问答 → 快速；其他 → 平衡。新手推荐"
+        }
+        return CLIModelTier(rawValue: raw)?.displayCaption ?? ""
     }
 }
 

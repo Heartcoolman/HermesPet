@@ -79,4 +79,49 @@ enum CLIModelTier: String {
         }
         return false
     }
+
+    // MARK: - 高级区 override（默认无 override，走自动判定）
+
+    /// UserDefaults key —— 用户在 SettingsView "高级"区锁定档位的存储位置。
+    /// 空串 / 缺失 = 自动判定（默认行为）。
+    static func overrideKey(for mode: AgentMode) -> String? {
+        switch mode {
+        case .claudeCode: return "claudeCLITierOverride"
+        case .codex:      return "codexCLITierOverride"
+        default:          return nil
+        }
+    }
+
+    /// 综合 override + 自动判定。`ChatViewModel` 在 spawn 前调用。
+    ///
+    /// **用户在「高级」区锁定档位 → 强制返回该档**；否则走 `decide(messages:)` 自动判定。
+    /// 高级区默认折叠且选「自动」，新手永远走自动路径，零干扰。
+    static func resolve(mode: AgentMode, messages: [ChatMessage]) -> CLIModelTier {
+        guard let key = overrideKey(for: mode) else {
+            return decide(messages: messages)
+        }
+        let raw = (UserDefaults.standard.string(forKey: key) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.isEmpty, let forced = CLIModelTier(rawValue: raw) {
+            return forced
+        }
+        return decide(messages: messages)
+    }
+
+    /// 用户在高级区看到的中文档位名 + 一句话说明。
+    var displayLabel: String {
+        switch self {
+        case .fast:     return "快速"
+        case .balanced: return "平衡"
+        case .deep:     return "深度"
+        }
+    }
+
+    var displayCaption: String {
+        switch self {
+        case .fast:     return "锁定 haiku / mini —— 短问答更快，复杂任务质量会下降"
+        case .balanced: return "锁定 CLI 自带默认（sonnet / gpt-5.4）—— 跟不开高级一样"
+        case .deep:     return "锁定 opus / codex —— 复杂任务质量高，但更慢"
+        }
+    }
 }
