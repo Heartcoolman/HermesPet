@@ -440,21 +440,25 @@ struct ChatInputField: View {
         // 拖拽 hover 反馈和文件处理都由 ChatView 顶层统一负责
     }
 
-    /// iMessage 风格：Capsule 容器 + 简短 placeholder + 28pt 圆按钮，符合 Apple HIG。
-    /// 关键约束：Capsule 左右各有半径 = height/2 的半圆区域，内容必须避开它，
-    /// 否则会"陷"进圆弧里看起来贴边。容器高度 36pt → 半径 18pt → leading/trailing 至少 14pt。
+    /// iMessage 风格：空/单行时保持原来的小胶囊；多行时才展开成圆角输入面板。
+    /// 发送按钮始终 overlay 固定在右侧，避免长文本挤到按钮下面。
     private var inputRow: some View {
-        HStack(alignment: .center, spacing: 6) {
-            // 输入区
+        let measuredHeight = min(max(textHeight, 28), 112)
+        let isExpanded = measuredHeight > 34 || text.contains("\n")
+        let editorHeight = isExpanded ? measuredHeight : 28
+        let cornerRadius: CGFloat = isExpanded ? 18 : 20
+
+        return ZStack(alignment: .bottomTrailing) {
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
                     Text(placeholderText)
-                        .font(.system(size: 14))          // HIG: 14pt subhead
-                        .foregroundStyle(.tertiary)       // 系统 placeholder 语义色
-                        .padding(.leading, 8)             // = textContainerInset.width，跟光标对齐
-                        .padding(.top, 5)                 // = textContainerInset.height
+                        .font(.system(size: 14))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 8)
+                        .padding(.top, 5)
                         .allowsHitTesting(false)
                 }
+
                 SendOnEnterTextEditor(
                     text: $text,
                     isFocused: $isFocused,
@@ -462,10 +466,13 @@ struct ChatInputField: View {
                     onSend: onSend,
                     onPasteImage: onPasteImage
                 )
-                // 单行 28pt 起步，跟随内容长高，最高 100pt 后内部滚动
-                .frame(height: min(max(textHeight, 28), 100))
+                // 单行 28pt 起步，进入多行后跟随内容长高，最高 112pt 后内部滚动
+                .frame(height: editorHeight)
                 .opacity(isLoading ? 0.5 : 1)
             }
+            .padding(.leading, 14)
+            .padding(.trailing, 42)
+            .padding(.vertical, 6)
 
             SendButton(
                 isLoading: isLoading,
@@ -474,20 +481,21 @@ struct ChatInputField: View {
                 action: { isLoading ? onCancel() : onSend() }
             )
             .keyboardShortcut(.defaultAction)
+            .padding(.trailing, 6)
+            .padding(.bottom, 6)
         }
-        .padding(.leading, 14)       // 避开 Capsule 左半圆，让文字落在直线段上
-        .padding(.trailing, 6)       // 按钮自己 28pt + 6 = 距右 20pt，刚好出半圆区
-        .padding(.vertical, 4)       // 容器总高 = 28 + 8 = 36pt（HIG 标准）
+        .frame(minHeight: 40)
         .background(
-            Capsule(style: .continuous)
-                .fill(.primary.opacity(0.06))
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(.primary.opacity(isExpanded ? 0.075 : 0.06))
         )
         .overlay(
-            Capsule(style: .continuous)
-                .stroke(.primary.opacity(0.14), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(isFocused ? tint.opacity(0.45) : .primary.opacity(0.14), lineWidth: 0.7)
         )
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .animation(AnimTok.snappy, value: isExpanded)
     }
 
     /// 跟随当前 mode 的简短 placeholder（HIG: 1-3 字名词）
@@ -577,6 +585,10 @@ struct SendOnEnterTextEditor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = PasteAwareTextView.scrollableTextView()
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         // documentView 理论上一定是 PasteAwareTextView（由 scrollableTextView() 工厂创建），
         // 但 AppKit 不在类型系统保证这一点，强制 cast 失败会崩，所以走安全路径。
         guard let textView = scrollView.documentView as? PasteAwareTextView else {
