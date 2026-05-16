@@ -17,9 +17,12 @@ struct ModeSpriteView: View {
         case .claudeCode:
             // Clawd 是 3:1 宽矮比例的像素精灵，让它用自己的 aspect ratio，不强行套正方形
             ClaudeKnotSprite(isWorking: isWorking, size: size)
-        case .hermes, .directAPI:
-            // 在线 AI 跟 Hermes 都是 OpenAI 兼容 HTTP，行为一致 —— 共用羽毛精灵
+        case .hermes:
             HermesFeatherSprite(isWorking: isWorking, size: size)
+                .frame(width: size + 4, height: size + 4)
+        case .directAPI:
+            // 在线 AI 跑 opencode agent runtime，视觉用云朵小精灵区别于 Hermes 羽毛
+            CloudPetIslandSprite(isWorking: isWorking, size: size)
                 .frame(width: size + 4, height: size + 4)
         case .codex:
             CodexCursorSprite(isWorking: isWorking, size: size)
@@ -883,3 +886,194 @@ struct CodexCursorSprite: View {
         }
     }
 }
+// MARK: - DirectAPI：云朵精灵（indigo 像素小云，有眼睛 + 呼吸 + 飘浮）
+
+/// 在线 AI 的灵动岛精灵 —— 跟 ClaudeKnotSprite 类似的 pose 驱动 + 工具动画
+struct CloudPetIslandSprite: View {
+    let isWorking: Bool
+    let size: CGFloat
+
+    @State private var pose: ClawdPose = .rest
+    @State private var workingTask: Task<Void, Never>?
+    @State private var lookTask: Task<Void, Never>?
+    @State private var currentTool: ToolKind = .other
+
+    private var cloudHeight: CGFloat { size * 1.3 }
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            CloudPetView(pose: pose, height: cloudHeight, isWalking: false)
+            if isWorking {
+                ToolOverlay(kind: currentTool)
+                    .offset(x: 3, y: -2)
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
+            }
+        }
+        .animation(AnimTok.smooth, value: isWorking)
+        .onAppear { applyState(isWorking) }
+        .onChange(of: isWorking) { _, w in applyState(w) }
+        .onDisappear { workingTask?.cancel(); lookTask?.cancel() }
+        .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetToolStarted"))) { note in
+            guard let name = note.userInfo?["name"] as? String else { return }
+            withAnimation(AnimTok.snappy) { currentTool = ToolKind.from(toolName: name) }
+        }
+    }
+
+    private func applyState(_ working: Bool) {
+        if working {
+            lookTask?.cancel(); lookTask = nil
+            startWorking()
+        } else {
+            workingTask?.cancel(); workingTask = nil
+            pose = .rest
+            startIdleLook()
+        }
+    }
+
+    private func startWorking() {
+        workingTask?.cancel()
+        workingTask = Task { @MainActor in
+            while !Task.isCancelled {
+                pose = .armsUp
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                if Task.isCancelled { return }
+                pose = .rest
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                if Task.isCancelled { return }
+            }
+        }
+    }
+
+    private func startIdleLook() {
+        lookTask?.cancel()
+        lookTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64.random(in: 20_000_000_000...40_000_000_000))
+                if Task.isCancelled { return }
+                pose = Bool.random() ? .lookLeft : .lookRight
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if Task.isCancelled { return }
+                pose = .rest
+            }
+        }
+    }
+}
+
+/// 云朵精灵像素渲染器 —— viewBox 14×10 的 indigo 小云，带两只眼睛。
+/// 动画：呼吸（上下浮动 ±1pt）+ 眨眼 + 走路时左右摇摆
+struct CloudPetView: View {
+    let pose: ClawdPose
+    let height: CGFloat
+    var isWalking: Bool = false
+
+    private static let bodyColor = Color(red: 0.45, green: 0.40, blue: 0.85)
+    private static let bodyTopColor = Color(red: 0.58, green: 0.52, blue: 0.95)
+    private static let bodyBottomColor = Color(red: 0.35, green: 0.30, blue: 0.72)
+    private static let viewBoxW: CGFloat = 14
+    private static let viewBoxH: CGFloat = 10
+    private static let centerX: CGFloat = 7
+    private static let centerY: CGFloat = 5
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+            Canvas(rendersAsynchronously: false) { ctx, size in
+                draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
+            }
+        }
+        .frame(width: height * Self.viewBoxW / Self.viewBoxH, height: height)
+    }
+
+    private func draw(ctx: GraphicsContext, size: CGSize, now: TimeInterval) {
+        let unit = min(size.width / Self.viewBoxW, size.height / Self.viewBoxH)
+        let bodyFill = GraphicsContext.Shading.color(Self.bodyColor)
+        let topFill = GraphicsContext.Shading.color(Self.bodyTopColor)
+        let bottomFill = GraphicsContext.Shading.color(Self.bodyBottomColor)
+        let eyeFill = GraphicsContext.Shading.color(.white)
+        let pupilFill = GraphicsContext.Shading.color(.black)
+        let shadowFill = GraphicsContext.Shading.color(.black.opacity(0.3))
+
+        // 呼吸：上下浮动
+        let breatheT = sin(now * 2 * .pi / 3.5)
+        let floatY: CGFloat = CGFloat(breatheT) * 0.4
+
+        // 走路摇摆
+        let swayX: CGFloat = isWalking ? CGFloat(sin(now * 2 * .pi / 0.8)) * 0.3 : 0
+
+        // 眨眼
+        let blinkCycle = 5.0
+        let blinkPhase = now.truncatingRemainder(dividingBy: blinkCycle) / blinkCycle
+        let isBlinking = blinkPhase > 0.96
+
+        // 眼神偏移
+        let eyeLookX: CGFloat = {
+            switch pose {
+            case .lookLeft: return -1.5
+            case .lookRight: return 1.5
+            case .armsUp, .rest: return 0
+            }
+        }()
+
+        let dy = floatY
+        let dx = swayX
+
+        // 阴影（椭圆，固定在底部）
+        let shadowRect = CGRect(
+            x: (3) * unit, y: 9 * unit,
+            width: 8 * unit, height: 1 * unit
+        )
+        ctx.fill(Path(ellipseIn: shadowRect), with: shadowFill)
+
+        // 云朵主体：圆润的形状用多个重叠矩形模拟
+        // 底部宽体 (x:2, y:4, w:10, h:4)
+        fillRect(x: 2 + dx, y: 4 + dy, w: 10, h: 4, ctx: ctx, unit: unit, fill: bodyFill)
+        // 顶部凸起 (x:3, y:2, w:8, h:3)
+        fillRect(x: 3 + dx, y: 2 + dy, w: 8, h: 3, ctx: ctx, unit: unit, fill: bodyFill)
+        // 左凸 (x:1, y:5, w:2, h:2)
+        fillRect(x: 1 + dx, y: 5 + dy, w: 2, h: 2, ctx: ctx, unit: unit, fill: bodyFill)
+        // 右凸 (x:11, y: 5, w:2, h:2)
+        fillRect(x: 11 + dx, y: 5 + dy, w: 2, h: 2, ctx: ctx, unit: unit, fill: bodyFill)
+        // 顶部高光
+        fillRect(x: 4 + dx, y: 2 + dy, w: 6, h: 1, ctx: ctx, unit: unit, fill: topFill)
+        // 底部阴影
+        fillRect(x: 3 + dx, y: 7 + dy, w: 8, h: 1, ctx: ctx, unit: unit, fill: bottomFill)
+
+        // 小脚（走路时交替抬放）
+        let walkPhase = isWalking ? now.truncatingRemainder(dividingBy: 0.8) / 0.8 : 0
+        let leftFootDY: CGFloat = isWalking ? (walkPhase < 0.5 ? -0.5 : 0) : 0
+        let rightFootDY: CGFloat = isWalking ? (walkPhase >= 0.5 ? -0.5 : 0) : 0
+        fillRect(x: 4 + dx, y: 8 + dy + leftFootDY, w: 2, h: 1, ctx: ctx, unit: unit, fill: bodyFill)
+        fillRect(x: 8 + dx, y: 8 + dy + rightFootDY, w: 2, h: 1, ctx: ctx, unit: unit, fill: bodyFill)
+
+        // 眼睛
+        let eyeY: CGFloat = 4 + dy
+        let leftEyeX: CGFloat = 4.5 + dx + eyeLookX * 0.3
+        let rightEyeX: CGFloat = 8.5 + dx + eyeLookX * 0.3
+
+        if isBlinking {
+            // 闭眼：横线
+            fillRect(x: leftEyeX, y: eyeY + 0.7, w: 1.5, h: 0.3, ctx: ctx, unit: unit, fill: pupilFill)
+            fillRect(x: rightEyeX, y: eyeY + 0.7, w: 1.5, h: 0.3, ctx: ctx, unit: unit, fill: pupilFill)
+        } else {
+            // 白色眼白
+            fillRect(x: leftEyeX, y: eyeY, w: 1.8, h: 1.8, ctx: ctx, unit: unit, fill: eyeFill)
+            fillRect(x: rightEyeX, y: eyeY, w: 1.8, h: 1.8, ctx: ctx, unit: unit, fill: eyeFill)
+            // 黑色瞳孔
+            let pupilDX = eyeLookX * 0.15
+            fillRect(x: leftEyeX + 0.5 + pupilDX, y: eyeY + 0.5, w: 1.0, h: 1.0, ctx: ctx, unit: unit, fill: pupilFill)
+            fillRect(x: rightEyeX + 0.5 + pupilDX, y: eyeY + 0.5, w: 1.0, h: 1.0, ctx: ctx, unit: unit, fill: pupilFill)
+        }
+
+        // armsUp 时顶部多一个小凸起（像伸手）
+        if pose == .armsUp {
+            fillRect(x: 5 + dx, y: 1 + dy, w: 4, h: 1.5, ctx: ctx, unit: unit, fill: topFill)
+        }
+    }
+
+    private func fillRect(x: CGFloat, y: CGFloat, w: CGFloat, h: CGFloat,
+                          ctx: GraphicsContext, unit: CGFloat,
+                          fill: GraphicsContext.Shading) {
+        ctx.fill(Path(CGRect(x: x * unit, y: y * unit, width: w * unit, height: h * unit)), with: fill)
+    }
+}
+
+

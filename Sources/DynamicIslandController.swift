@@ -22,8 +22,11 @@ final class DynamicIslandController {
 
     /// 悬停（hover）状态：向下展开的高度
     private let hoverDrop: CGFloat = 36
-    /// 悬停（hover）状态：横向比刘海多出多少
-    private let hoverExtraWidth: CGFloat = 80
+    /// 悬停（hover）状态：横向比刘海多出多少。
+    /// **水滴动画**：idle 时两侧耳朵全宽（80）跟刘海融为一体；hover 时收窄到 4，
+    /// 整体宽度几乎等同于 MacBook 硬件刘海宽度（auxiliaryTopArea 反推得到的真实像素），
+    /// 视觉上像一滴墨从刘海正下方润下来，两侧耳朵随高度展开同步回缩
+    private let hoverExtraWidth: CGFloat = 4
 
     init() {
         // window 始终是 idle 尺寸（也就是最大尺寸），命中区域 = 整个 window
@@ -284,8 +287,13 @@ struct DynamicIslandPillView: View {
     var body: some View {
         pillBodyWithStateObservers
             .onHover { hovering in
-            // 用 spring 做"流畅过渡"：response 越小越快，dampingFraction 越大越稳重
-            withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) {
+            // **水滴动画**：width 80→4 + height 32→64 + radius 14→22 三轴同步驱动。
+            // 用 interpolatingSpring（mass=1.0, stiffness=180, damping=22）让水流感更连贯：
+            //  · stiffness 180 比标准 spring 软，水滴下流不"砸"
+            //  · damping 22 让收尾平滑无回弹
+            //  · mass 1.0 给形变一点"惯性"，模拟液体黏滞性
+            // 比之前的 spring(response:0.38, dampingFraction:0.82) 更像液体而非弹簧
+            withAnimation(.interpolatingSpring(mass: 1.0, stiffness: 180, damping: 22, initialVelocity: 0)) {
                 isHovering = hovering
             }
         }
@@ -537,7 +545,20 @@ struct DynamicIslandPillView: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .contentShape(Rectangle())
+        // hover 命中区严格限制到"硬件刘海几何区"，传**死高度**而非 inset
+        // （SwiftUI 给 path(in:) 的 rect 是外层 maxFrame=windowHeight 64pt，
+        //  之前用 inset 算出 56pt 命中区，鼠标贴近菜单栏就会误触发 —— 已修正）
+        // idle:  hitHeight = notchHeight - 4 = 24pt（命中区严格在刘海可见 28pt 内，
+        //        还要鼠标深入 4pt 才触发，杜绝菜单栏下沿误触）
+        //        horizontalInset = idleExtraWidth/2 = 40pt（两侧耳朵延伸区不响应）
+        // hover: hitHeight = windowHeight 64pt（覆盖完整水滴），horizontalInset = 0
+        //        —— 鼠标在扩展区停留不会立刻丢 hover
+        .contentShape(
+            IslandHitShape(
+                hitHeight: isExpanded ? (notchHeight + hoverDrop) : max(0, notchHeight - 4),
+                horizontalInset: isExpanded ? 0 : idleExtraWidth / 2
+            )
+        )
     }
 
     /// h) 截屏快门白光叠层
@@ -1099,6 +1120,38 @@ struct CheckmarkShape: Shape {
         // 终点：右上
         path.addLine(to: CGPoint(x: rect.maxX,                y: rect.minY))
         return path
+    }
+}
+
+/// 灵动岛 hover 命中区形状 —— 严格控制 onHover 触发的几何边界。
+/// - `hitHeight`：从顶端往下多少 pt 是命中区（绝对值，不依赖 rect.height）
+/// - `horizontalInset`：左右内缩 pt（每侧各缩 N pt，把两侧耳朵延伸区排除）
+///
+/// **为什么用绝对值不用 inset**：之前用 `bottomInset` 减 rect.height 算高度有 bug ——
+/// SwiftUI 给 `path(in:)` 传的是外层 VStack 的 maxFrame（整个 NSWindow 64pt），
+/// 不是内层 NotchShape 的当前高度。`rect.height - 8 = 56pt` 命中区远超刘海 28pt，
+/// 导致鼠标在刘海下方任何位置都触发。改成传死高度后 idle 直接锁 24pt，跟动态 frame 解耦。
+struct IslandHitShape: Shape {
+    /// 命中区从顶端往下覆盖多少 pt（不超过 view 的 rect.height）
+    var hitHeight: CGFloat
+    /// 每侧横向内缩 pt
+    var horizontalInset: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(hitHeight, horizontalInset) }
+        set {
+            hitHeight = newValue.first
+            horizontalInset = newValue.second
+        }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let x = horizontalInset
+        let w = max(0, rect.width - horizontalInset * 2)
+        let h = min(rect.height, max(0, hitHeight))
+        var p = Path()
+        p.addRect(CGRect(x: x, y: 0, width: w, height: h))
+        return p
     }
 }
 

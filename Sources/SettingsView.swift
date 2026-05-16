@@ -723,28 +723,37 @@ struct SettingsView: View {
 
             Divider()
 
+            // 桌面漫步统一区 —— 覆盖 Claude (Clawd 螃蟹) 和 在线 AI (云朵小精灵) 两种桌宠
+            VStack(alignment: .leading, spacing: 6) {
+                Label("桌面漫步", systemImage: "figure.walk")
+                    .font(.system(size: 13, weight: .medium))
+                Text("从灵动岛跳出，沿菜单栏正下方左右走动。Claude 是 Clawd 🦞，在线 AI 是云朵 ☁️。")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+
             captionToggle(
                 icon: "figure.walk",
-                iconColor: clawdColor,
-                title: "Clawd 桌面漫步",
-                caption: "Claude 模式 + 3 分钟无操作 → Clawd 从灵动岛跳出，沿菜单栏漫步",
+                iconColor: petColor,
+                title: "启用桌面漫步",
+                caption: "总开关。关掉后两种桌宠都不会出现",
                 isOn: $viewModel.clawdWalkEnabled
             )
 
             captionToggle(
                 icon: "infinity",
-                iconColor: clawdColor,
-                title: "自由活动",
-                caption: "跳过 idle 等待，Claude 模式下 Clawd 一直在屏幕上玩",
+                iconColor: petColor,
+                title: "Claude · 自由活动",
+                caption: "Claude 模式下跳过 3 分钟 idle 等待，Clawd 一直在屏幕上玩。在线 AI 切过去时云朵默认立刻出来，不受此项影响",
                 isOn: $viewModel.clawdFreeRoamEnabled,
                 disabled: !viewModel.clawdWalkEnabled
             )
 
             captionToggle(
                 icon: "sparkles.rectangle.stack",
-                iconColor: clawdColor,
-                title: "桌面巡视（Clawd 嗅文件）",
-                caption: "漫步期间偶尔下到桌面，挑个图标用 Hermes 给一句短评。需要 Finder 自动化权限",
+                iconColor: petColor,
+                title: "Claude · 桌面巡视（嗅文件）",
+                caption: "漫步期间偶尔下到桌面，挑个图标用 Hermes 给一句短评。仅 Clawd 参与，需要 Finder 自动化权限",
                 isOn: $viewModel.clawdDesktopPatrolEnabled,
                 disabled: !viewModel.clawdWalkEnabled
             )
@@ -752,12 +761,12 @@ struct SettingsView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Label("交互", systemImage: "hand.tap")
+                Label("交互（两种桌宠通用）", systemImage: "hand.tap")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(.secondary)
-                interactionTip("单击", "打开聊天")
-                interactionTip("双击", "切到 Claude 模式")
-                interactionTip("拖文件给它", "Clawd 吃掉并交给 AI 看")
+                interactionTip("单击 / 双击", "打开聊天窗（不切换模式）")
+                interactionTip("鼠标 hover", "暂停漫步")
+                interactionTip("拖文件给它", "Clawd 吃掉并交给 AI 看（仅 Claude 模式）")
             }
             .padding(12)
             .background(Color.secondary.opacity(0.06))
@@ -765,8 +774,9 @@ struct SettingsView: View {
         }
     }
 
-    private var clawdColor: Color {
-        Color(red: 215.0/255, green: 119.0/255, blue: 87.0/255)
+    /// 桌宠区主色 —— 用偏中性的灰蓝避免暗示只服务某一只宠物
+    private var petColor: Color {
+        Color(red: 110.0/255, green: 130.0/255, blue: 165.0/255)
     }
 
     private func captionToggle(icon: String, iconColor: Color, title: String, caption: String,

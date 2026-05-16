@@ -461,6 +461,60 @@
 
 ---
 
+## [P0-Bug] 在线 AI 文档附件（2026-05-16）
+
+- [ ] **复测 v1.2.0 的 directAPI 模式拖入文档是否真的吃到**
+  - 现象：在 PR #14 preview（v1.0.2 base）上拖文档进去，AI 没读到，回复跟没看见一样
+  - 但 PR base 时代 directAPI 是纯 HTTP，本来就不能读本地文件 → preview 上有 bug 是符合预期的
+  - **真正要确认**：v1.2.0 上 directAPI 走 opencode runtime，理论上 `--add-dir <doc 父目录>` + prompt 末尾告诉 AI 用 Read 工具 应该能读 —— 实际跑一遍验证
+  - 排查点：
+    1. `ChatViewModel.attachDocumentPath` 在 `.directAPI` 是否真的把 path 写进 `pendingDocuments`（应该接受，不像 hermes 那样拒绝）
+    2. `OpenCodeClient.streamCompletion` 是否把 `documentPaths` 父目录拼到 spawn opencode 的 `--add-dir` 参数（grep `--add-dir` Sources/OpenCodeClient.swift）
+    3. `buildPrompt` 末尾是否拼了"附带的文档（请用 Read 工具按这些绝对路径查看）"+ 路径列表（跟 ClaudeCodeClient 同款拼法）
+    4. opencode 子进程实际收到的 prompt 里有没有这段（看 `~/.hermespet/opencode-debug.log` 最近 spawn）
+  - 如果 v1.2.0 自己也有 bug：按上面 4 点定位修，不要光改 prompt 不开 `--add-dir`（opencode 没授权访问那个目录会拒绝 Read）
+
+## [P1] PR #14 处理决定（2026-05-16 本地 review 后）
+
+PR 作者 simpledavid，3 个独立 commit 塞一个 PR（3011+ 行）。本地 review 后逐项决定：
+
+### 要保留的
+- [x] **review 完成** —— 整个 PR 切到 PR #14 base 分支独立 build 通过（Apple Development 签名），preview 验证云朵宠物效果
+- [ ] **吸收云朵宠物（`755ac8f`）** —— directAPI 模式灵动岛左耳云朵小精灵 + 桌面漫步。视觉效果好，跟 v1.2.0 indigo 配色一致。代码隔离度高（只动 ModeSprite.swift + ClawdWalkOverlay.swift 共 2 文件 220 行）
+  - 单独 cherry-pick 失败原因：依赖 `0286b60` 的 CodexPetAsset 基础设施。要么连 Codex 桌宠基础设施一起拿（再删 Codex 桌宠那部分），要么手动重写云朵实现独立于 CodexPetAsset
+
+### 拒收的
+- [ ] **不要 Codex 桌宠（`0286b60` 全部）** —— 用户反馈"太丑了"。这一 commit 还掺了 ⌘⇧P 热键含义变更（pin 管理器 / ⌘⇧X 关闭全部 pin），跟 v1.2.0 已发布的"⌘⇧P pin 最新 AI 回答"语义冲突，必须拒收
+
+### 待评估的（智能感知三件套 `9ac742c`，+511 行 4 个新文件）
+代码读完，每个单独看都没大问题，但堆叠起来"功能过载"是合理担忧：
+
+- [ ] **ActivityAwareness（183 行）** —— NSWorkspace.frontmostApplication 监听 + 5s 防抖 + bundle ID 分类表（coding/watching/chatting/writing）
+  - 风险：hardcoded bundle ID 列表会漏（用户在 Cursor 写 Markdown 被判 coding 让宠物左右看会违和）
+  - 已经有 v1.2.0 的 `ActivityRecorder` 做更纯粹的活动统计，再加一层"反应桌宠"可能职责重叠
+  - 决定：**默认关闭 + 设置面板单独 toggle**，让喜欢的用户开
+
+- [ ] **ClipboardAssistant（76 行）** —— 复制文字 → 桌宠气泡"需要我帮你分析吗？"
+  - CLAUDE.md `[P3-暂不做]` 已明确拒绝过："剪贴板自动监听 → 弹 AI 气泡（隐私敏感 + 用户没明确要求别主动出来）"
+  - 决定：**拒收**，跟既定隐私底线直接冲突
+
+- [ ] **WeatherService（152 行）** —— wttr.in 30min 刷新 + 桌宠像素配饰（伞/帽/墨镜/围巾）
+  - wttr.in 免 key 免定位权限，技术上轻
+  - 价值低（聊天 app 不是天气 app），但视觉装饰增加桌宠"生命感"
+  - 决定：**P3 待定**，可吸收但不优先
+
+- [ ] **SeasonalEffect（100 行）** —— 圣诞雪花 / 春节红光 / 万圣紫色叠加灵动岛
+  - 跟 v1.2.0 已有的 mode 主色 + 工具进度色调可能冲突
+  - 节日效果有侵入性，用户不一定喜欢
+  - 决定：**默认关闭**才能吸收，否则拒
+
+- [ ] **台词池扩充到 100+ 句 + 冒泡频率 20-55s** —— 跟 v1.2.0 桌宠改动叠加要看是否破坏现有节奏感
+
+### 给作者的反馈（待发 PR comment）
+- [ ] 写 PR comment：感谢贡献，但需要 (1) 拆成 3 个独立 PR；(2) Codex 桌宠美术风格不符合产品调性请去掉；(3) Pin 管理器 ⌘⇧P 跟 v1.2.0 已发布的 pin-last-answer 冲突，需重新设计热键；(4) ClipboardAssistant 跟 CLAUDE.md 隐私底线冲突请去掉；(5) 智能感知三件套每项加默认关闭的设置 toggle
+
+---
+
 ## [P3-暂不做] 低价值或高成本
 - [ ] 跨设备同步 / iCloud
 - [ ] 自动更新机制（Sparkle 集成）

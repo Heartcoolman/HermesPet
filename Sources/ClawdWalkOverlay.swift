@@ -110,8 +110,15 @@ final class ClawdWalkController {
     func start(viewModel: ChatViewModel) {
         self.viewModel = viewModel
         self.lastMode = viewModel.agentMode
+        state.visual = petVisual(for: viewModel.agentMode)
         registerNotifications()
         evaluateState()
+    }
+
+    /// 根据当前 AgentMode 选择宠物种类。claudeCode → clawd / directAPI → cloud；
+    /// 其他 mode 桌宠不出现（shouldShow 已拦），此处 fallback 到 clawd 即可
+    private func petVisual(for mode: AgentMode) -> PetVisualKind {
+        mode == .directAPI ? .cloud : .clawd
     }
 
     // MARK: - Notification 监听
@@ -161,8 +168,10 @@ final class ClawdWalkController {
             let raw = (note.userInfo?["mode"] as? String) ?? ""
             let mode = AgentMode(rawValue: raw) ?? .hermes
             Task { @MainActor in
-                self?.lastMode = mode
-                self?.evaluateState()
+                guard let self = self else { return }
+                self.lastMode = mode
+                self.state.visual = self.petVisual(for: mode)
+                self.evaluateState()
             }
         }
 
@@ -197,9 +206,11 @@ final class ClawdWalkController {
     private func shouldShow() -> Bool {
         guard let vm = viewModel else { return false }
         guard vm.clawdWalkEnabled else { return false }
-        guard vm.agentMode == .claudeCode else { return false }
+        guard vm.agentMode == .claudeCode || vm.agentMode == .directAPI else { return false }
         // streaming 时永远不出来（不管哪种模式），避免抢灵动岛进度的注意力
         if vm.conversations.contains(where: { $0.isStreaming }) { return false }
+        // directAPI 在线 AI 模式：宠物直接到桌面，不等 idle（云朵小精灵主动陪伴）
+        if vm.agentMode == .directAPI { return true }
         // 自由活动模式：放行
         if vm.clawdFreeRoamEnabled { return true }
         // 普通模式：必须 idle
@@ -945,10 +956,9 @@ final class ClawdWalkController {
     }
 
     private func handleDoubleTap() {
-        // 在 Claude 模式下 → 双击当成单击（打开聊天）
-        // 不在 Claude 时这个 controller 本来就不会出现，所以兜底逻辑此处用不到
-        guard let vm = viewModel else { return }
-        if vm.agentMode != .claudeCode { vm.agentMode = .claudeCode }
+        // 双击 = 单击：开聊天。
+        // 不做跨 mode 切换 —— 桌宠出现时本来就在对应 mode（Claude 出 Clawd / directAPI 出云朵），
+        // 双击强切到 Claude 反而让在线 AI 用户莫名跳模式（用户 2026-05-16 反馈禁掉）
         triggerJump()
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 200_000_000)
@@ -1121,6 +1131,16 @@ final class ClawdWalkState {
     /// 用户正在用鼠标拖动 Clawd —— 用于视觉反馈（轻微放大 + 优先级最高的 armsUp pose），
     /// 也让 ClawdWalkController.tick 跳过自动位移，避免手势 / tick 双写打架
     var isBeingDragged: Bool = false
+
+    /// 当前要渲染哪一种像素宠物。Controller 根据 agentMode 设置：
+    /// claudeCode → .clawd（橙色螃蟹）；directAPI → .cloud（indigo 云朵）
+    var visual: PetVisualKind = .clawd
+}
+
+/// 桌面漫步支持的两种像素宠物视觉。
+enum PetVisualKind {
+    case clawd
+    case cloud
 }
 
 // MARK: - File Drop View
@@ -1207,22 +1227,31 @@ struct ClawdWalkView: View {
 
     var body: some View {
         ZStack {
-            // 把 state.isWalking 传给 ClawdView，让它内部播放官方走路动画
-            // （4 腿对角交替、身体 bob、手臂上下摆 —— 这些是 SVG 原版 keyframe，
-            // 不再用 SwiftUI 外层 bobOffset 重复模拟）
-            ClawdView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking)
-                // 朝向 + 吃东西时的整体缩放（鼓胀 / 缩小消失）合到一个 scaleEffect
-                // 被拖动时整体放大 1.08，给"我被拎起来啦"的视觉反馈
-                .scaleEffect(x: (state.facingRight ? 1 : -1) * state.eatScale * (state.isBeingDragged ? 1.08 : 1),
-                             y: state.eatScale * (state.isBeingDragged ? 1.08 : 1),
-                             anchor: .bottom)
-                // jump 优先级最高 → 戳一下时整体跳起 -10pt
-                .offset(y: state.isJumping ? -10 : 0)
-                .animation(.spring(response: 0.32, dampingFraction: 0.55), value: state.isJumping)
-                .animation(.easeInOut(duration: 0.18), value: state.facingRight)
-                .animation(.spring(response: 0.28, dampingFraction: 0.6), value: state.eatScale)
-                .animation(.spring(response: 0.25, dampingFraction: 0.6), value: state.isBeingDragged)
-                .contentShape(Rectangle())   // 透明 padding 不接收点击
+            // 按当前宠物种类切渲染。两种 sprite 应用同一套 scale/offset/animation modifier，
+            // 保证 walk/jump/drag/facing 等手势行为视觉一致。
+            Group {
+                switch state.visual {
+                case .clawd:
+                    // 把 state.isWalking 传给 ClawdView，让它内部播放官方走路动画
+                    // （4 腿对角交替、身体 bob、手臂上下摆 —— 这些是 SVG 原版 keyframe，
+                    // 不再用 SwiftUI 外层 bobOffset 重复模拟）
+                    ClawdView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking)
+                case .cloud:
+                    CloudPetView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking)
+                }
+            }
+            // 朝向 + 吃东西时的整体缩放（鼓胀 / 缩小消失）合到一个 scaleEffect
+            // 被拖动时整体放大 1.08，给"我被拎起来啦"的视觉反馈
+            .scaleEffect(x: (state.facingRight ? 1 : -1) * state.eatScale * (state.isBeingDragged ? 1.08 : 1),
+                         y: state.eatScale * (state.isBeingDragged ? 1.08 : 1),
+                         anchor: .bottom)
+            // jump 优先级最高 → 戳一下时整体跳起 -10pt
+            .offset(y: state.isJumping ? -10 : 0)
+            .animation(.spring(response: 0.32, dampingFraction: 0.55), value: state.isJumping)
+            .animation(.easeInOut(duration: 0.18), value: state.facingRight)
+            .animation(.spring(response: 0.28, dampingFraction: 0.6), value: state.eatScale)
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: state.isBeingDragged)
+            .contentShape(Rectangle())   // 透明 padding 不接收点击
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 注意 onTapGesture(count:) 顺序：先 count:2，再 count:1，SwiftUI 才会先尝试双击
