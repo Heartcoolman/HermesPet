@@ -27,11 +27,21 @@ TMP_DMG="$DIST_DIR/${APP_NAME}-${VERSION}.tmp.dmg"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
-echo "🏗️  Release 构建..."
-swift build -c release --disable-sandbox
+# Universal build 需要完整 Xcode（xcbuild）。如果当前 xcode-select 指向 CLT
+# 而 Xcode.app 装在标准位置，临时通过 DEVELOPER_DIR 切过去
+if ! [ -d "$(xcode-select -p)/SharedFrameworks/XCBuild.framework" ] \
+   && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+    echo "ℹ️  使用 Xcode.app 编译 universal（xcode-select 当前指向 CLT，缺 xcbuild）"
+fi
+
+echo "🏗️  Release 构建（universal: arm64 + x86_64，Intel Mac 也能跑）..."
+# issue #6：原来只编当前架构（开发机是 Apple Silicon → 只产出 arm64），
+# Intel Mac 装上后报 "Bad CPU type in executable"。改 universal 一份通杀。
+swift build -c release --disable-sandbox --arch arm64 --arch x86_64
 
 echo "📦 组装 .app bundle..."
-BINARY="$BUILD_DIR/release/$APP_NAME"
+BINARY="$BUILD_DIR/apple/Products/Release/$APP_NAME"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"

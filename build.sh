@@ -10,11 +10,21 @@ BUNDLE_ID="com.nousresearch.hermespet"
 BUILD_DIR="$SCRIPT_DIR/.build"
 APP_BUNDLE="$SCRIPT_DIR/$APP_NAME.app"
 
-echo "🏗️  Building $APP_NAME..."
-swift build -c release --disable-sandbox
+# Universal build 需要完整 Xcode（xcbuild）。如果当前 xcode-select 指向 CLT
+# 而 Xcode.app 装在标准位置，临时通过 DEVELOPER_DIR 切过去，避免要求用户改全局
+if ! [ -d "$(xcode-select -p)/SharedFrameworks/XCBuild.framework" ] \
+   && [ -d "/Applications/Xcode.app/Contents/Developer" ]; then
+    export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+    echo "ℹ️  使用 Xcode.app 编译 universal（xcode-select 当前指向 CLT，缺 xcbuild）"
+fi
+
+echo "🏗️  Building $APP_NAME (universal: arm64 + x86_64)..."
+# 双架构 universal binary —— Intel Mac 也能跑（issue #6）
+# 多架构构建产物路径变为 .build/apple/Products/Release/
+swift build -c release --disable-sandbox --arch arm64 --arch x86_64
 
 echo "📦 Creating .app bundle..."
-BINARY="$BUILD_DIR/release/$APP_NAME"
+BINARY="$BUILD_DIR/apple/Products/Release/$APP_NAME"
 
 # Clean previous bundle
 rm -rf "$APP_BUNDLE"
