@@ -102,6 +102,7 @@ Saves context, saves tokens, runs faster, and the AI gets to decide which parts 
 - **Pin desktop cards**: pin any AI response to the top-right of the desktop, single-click to bring it back into chat
 - **Daily briefing**: AI reviews yesterday's activity and proactively gives you a markdown summary in the morning
 - **Input bar strictly follows Apple HIG** (Capsule + 28pt round button + iMessage-style placeholder)
+- **Window pinning toggle**: the 📌 icon in the chat window header switches between "always on top" and "normal window" — flip it off when you want other apps to be able to cover the chat
 - **Optional Dock icon**: defaults to menubar-agent style (no Dock entry); flip a toggle to show the Dock icon and enter Cmd+Tab
 
 ### 🔄 Auto-update · One-click feedback
@@ -173,7 +174,9 @@ New users default to "Online AI" mode, with a guide card on the welcome page tha
 
 ---
 
-## ⌨️ Global hotkeys
+## ⌨️ Keyboard shortcuts
+
+**Global hotkeys** (registered via Carbon Event Manager, trigger from any app):
 
 | Combo | Function |
 |---|---|
@@ -182,12 +185,15 @@ New users default to "Online AI" mode, with a guide card on the welcome page tha
 | `⌘⇧V` | Hold to talk, release to auto-send |
 | `⌘⇧P` | Pin the latest AI reply of the current conversation to the desktop |
 | `⌘⇧Space` | Spotlight-style quick-ask floating window |
-| `⌘N` | New conversation (inside chat window) |
-| `⌘[` / `⌘]` | Switch to previous / next conversation |
-| `⌘1` / `⌘2` / `⌘3` | Jump directly to that conversation |
-| `⌘⌫` | Close current conversation |
 
-Hotkeys are registered via Carbon Event Manager and **trigger from any app**.
+**In-window shortcuts** (active when the chat window is focused):
+
+| Combo | Function |
+|---|---|
+| `⌘N` | New conversation |
+| `⌘[` / `⌘]` | Switch to previous / next conversation |
+| `⌘1` ~ `⌘8` | Jump directly to that conversation |
+| `⌘⌫` | Close current conversation |
 
 ---
 
@@ -262,6 +268,12 @@ HermesPet is currently a one-person open-source project. Every issue / PR / star
 ## 📄 License
 
 [Apache License 2.0](./LICENSE)
+
+---
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=basionwang-bot/HermesPet&type=Date)](https://star-history.com/#basionwang-bot/HermesPet&Date)
 
 ---
 
