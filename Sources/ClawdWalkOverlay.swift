@@ -38,9 +38,23 @@ final class ClawdWalkController {
     private static let bubbleSize = NSSize(width: 160, height: 28)
 
     // MARK: - Walk params
-    /// 窗口尺寸 —— Clawd 像素是 11:10 接近正方形，高 30 时宽 33。
-    /// height=50 保证 padding 10pt 上下，刚好容纳 jumping=-10pt 不被 NSHostingView 截顶
-    private static let windowSize = NSSize(width: 48, height: 50)
+    /// 基础窗口尺寸 —— Clawd 像素是 11:10 接近正方形，基础高 50pt 保证 padding 10pt 上下
+    /// 容纳 jumping=-10pt 不被 NSHostingView 截顶
+    private static let baseWindowSize = NSSize(width: 48, height: 50)
+
+    /// 当前 scale（读 AppStorage，监听变化通过 PetWalkSizeScale.didChangeNotification）
+    private var sizeScale: CGFloat {
+        let raw = UserDefaults.standard.double(forKey: PetWalkSizeScale.storageKey)
+        return raw < 0.1 ? 1.0 : CGFloat(raw)
+    }
+
+    /// 当前实际窗口尺寸 = 基础 × scale。所有几何计算（撞墙 / 拖动 / patrol 站位）都读这个
+    private var windowSize: NSSize {
+        NSSize(
+            width: Self.baseWindowSize.width * sizeScale,
+            height: Self.baseWindowSize.height * sizeScale
+        )
+    }
     private static let walkSpeed: CGFloat = 28           // pt/s，慢悠悠
     private static let chaseSpeedMul: CGFloat = 1.6      // 鼠标靠近时小跑加速倍率
     private static let patrolSpeed: CGFloat = 60         // 巡视时下到桌面 / 回菜单栏速度
@@ -120,10 +134,18 @@ final class ClawdWalkController {
         evaluateState()
     }
 
-    /// 根据当前 AgentMode 选择宠物种类。claudeCode → clawd / directAPI → cloud；
-    /// 其他 mode 桌宠不出现（shouldShow 已拦），此处 fallback 到 clawd 即可
+    /// 根据当前 AgentMode 选择宠物种类。
+    /// - claudeCode → clawd（橙色螃蟹）
+    /// - directAPI → cloud（indigo 云朵）
+    /// - hermes → horse（金黄小马）
+    /// - codex → terminal（mini Terminal.app 窗口）
     private func petVisual(for mode: AgentMode) -> PetVisualKind {
-        mode == .directAPI ? .cloud : .clawd
+        switch mode {
+        case .directAPI:  return .cloud
+        case .hermes:     return .horse
+        case .codex:      return .terminal
+        case .claudeCode: return .clawd
+        }
     }
 
     // MARK: - Notification 监听
@@ -133,6 +155,11 @@ final class ClawdWalkController {
         // idle 状态变化（IdleStateTracker tick）
         nc.addObserver(forName: .init("HermesPetUserIdleChanged"), object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in self?.evaluateState() }
+        }
+
+        // 桌宠大小档位变化 —— 已显示中需要 setFrame 调整窗口 + walkY 重新计算
+        nc.addObserver(forName: PetWalkSizeScale.didChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.handleSizeScaleChanged() }
         }
 
         // 设置开关变化（漫步总开关 / 自由活动开关）
@@ -158,7 +185,7 @@ final class ClawdWalkController {
                     self.sniffAITask?.cancel()
                     self.sniffAITask = nil
                     if self.patrol != nil, let screen = self.targetScreen() {
-                        let home = NSPoint(x: self.notchCenterX(on: screen) - Self.windowSize.width / 2,
+                        let home = NSPoint(x: self.notchCenterX(on: screen) - self.windowSize.width / 2,
                                            y: self.walkBaseY(on: screen))
                         self.patrol = .returning(target: home)
                         self.state.bubbleVisible = false
@@ -232,7 +259,7 @@ final class ClawdWalkController {
     private func shouldShow() -> Bool {
         guard let vm = viewModel else { return false }
         guard vm.clawdWalkEnabled else { return false }
-        guard vm.agentMode == .claudeCode || vm.agentMode == .directAPI else { return false }
+        guard vm.agentMode == .claudeCode || vm.agentMode == .directAPI || vm.agentMode == .hermes || vm.agentMode == .codex else { return false }
         // 戴眼镜动画期间强制保持显示 —— 用户能看完整个"掏眼镜→戴上→保持→摘下"流程，
         // 之后再按常规规则判定是否回家（vision 切换后通常 streaming 仍在跑会回家）
         if let pending = glassesPendingUntil, pending > Date() { return true }
@@ -242,7 +269,7 @@ final class ClawdWalkController {
         if vm.agentMode == .directAPI { return true }
         // 自由活动模式：放行
         if vm.clawdFreeRoamEnabled { return true }
-        // 普通模式：必须 idle
+        // 普通模式（Claude / Hermes）：必须 idle 3min 才出来
         return IdleStateTracker.shared.isSleeping
     }
 
@@ -253,6 +280,25 @@ final class ClawdWalkController {
         } else if !want && isShown {
             stopAndHide()
         }
+    }
+
+    /// 用户在设置里改了桌宠大小档位 —— 已显示中调整窗口尺寸 + 重新算 walkY 让桌宠贴菜单栏
+    /// 桌宠不在屏幕上时无需任何操作（下次出场时 windowSize computed 自动用新 scale）
+    private func handleSizeScaleChanged() {
+        guard isShown, let win = window, let screen = targetScreen() else { return }
+        let newSize = windowSize
+        walkY = walkBaseY(on: screen)
+        // 重新 clamp positionX 避免新窗口宽溢出
+        let visible = screen.visibleFrame
+        let leftBound  = visible.minX + Self.edgeMargin
+        let rightBound = visible.maxX - newSize.width - Self.edgeMargin
+        positionX = max(leftBound, min(rightBound, positionX))
+        win.setFrame(
+            NSRect(x: positionX, y: walkY, width: newSize.width, height: newSize.height),
+            display: true, animate: false
+        )
+        // 气泡窗口跟新位置同步
+        syncBubbleWindow()
     }
 
     // MARK: - 屏幕几何
@@ -272,7 +318,7 @@ final class ClawdWalkController {
 
     /// 漫步 y：菜单栏下方 4pt 处。visibleFrame.maxY 已扣掉菜单栏，正好用
     private func walkBaseY(on screen: NSScreen) -> CGFloat {
-        let h = Self.windowSize.height
+        let h = windowSize.height
         return screen.visibleFrame.maxY - 4 - h
     }
 
@@ -285,7 +331,7 @@ final class ClawdWalkController {
 
         let startCenterX = notchCenterX(on: screen)
         walkY = walkBaseY(on: screen)
-        positionX = startCenterX - Self.windowSize.width / 2
+        positionX = startCenterX - windowSize.width / 2
         direction = Bool.random() ? 1 : -1
         nextPauseAt = Date().addingTimeInterval(Double.random(in: Self.pauseEveryMin...Self.pauseEveryMax))
         pauseEndsAt = nil
@@ -300,9 +346,9 @@ final class ClawdWalkController {
         scheduleNextPatrolIfEnabled(firstTime: true)
 
         // 入场：从灵动岛位置（y=屏幕顶部）滑到漫步 y + fade in
-        let islandTopY = screen.frame.maxY - Self.windowSize.height
+        let islandTopY = screen.frame.maxY - windowSize.height
         win.setFrame(
-            NSRect(x: positionX, y: islandTopY, width: Self.windowSize.width, height: Self.windowSize.height),
+            NSRect(x: positionX, y: islandTopY, width: windowSize.width, height: windowSize.height),
             display: false
         )
         win.alphaValue = 0
@@ -315,7 +361,7 @@ final class ClawdWalkController {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             win.animator().alphaValue = 1.0
             win.animator().setFrame(
-                NSRect(x: positionX, y: walkY, width: Self.windowSize.width, height: Self.windowSize.height),
+                NSRect(x: positionX, y: walkY, width: windowSize.width, height: windowSize.height),
                 display: true
             )
         })
@@ -352,15 +398,15 @@ final class ClawdWalkController {
 
         // 退场：滑回灵动岛位置 + fade out
         let islandCenterX = notchCenterX(on: screen)
-        let backX = islandCenterX - Self.windowSize.width / 2
-        let islandTopY = screen.frame.maxY - Self.windowSize.height
+        let backX = islandCenterX - windowSize.width / 2
+        let islandTopY = screen.frame.maxY - windowSize.height
 
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.35
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             win.animator().alphaValue = 0
             win.animator().setFrame(
-                NSRect(x: backX, y: islandTopY, width: Self.windowSize.width, height: Self.windowSize.height),
+                NSRect(x: backX, y: islandTopY, width: windowSize.width, height: windowSize.height),
                 display: true
             )
         }, completionHandler: { [weak win] in
@@ -372,7 +418,7 @@ final class ClawdWalkController {
 
     private func createWindow() {
         let w = NSPanel(
-            contentRect: NSRect(origin: .zero, size: Self.windowSize),
+            contentRect: NSRect(origin: .zero, size: windowSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -388,7 +434,7 @@ final class ClawdWalkController {
 
         // 容器 NSView：底层 SwiftUI hosting view（Clawd 视觉）+ 上层 FileDropView（接受拖放）
         // FileDropView 用 hitTest=nil 让点击事件穿透下去，但 dragging 事件正常拦截
-        let container = NSView(frame: NSRect(origin: .zero, size: Self.windowSize))
+        let container = NSView(frame: NSRect(origin: .zero, size: windowSize))
         container.autoresizingMask = [.width, .height]
 
         let host = NSHostingView(rootView: ClawdWalkView(
@@ -488,8 +534,8 @@ final class ClawdWalkController {
 
         // —— 1) 鼠标距离 + chasing 状态切换 ——
         let mouseLoc = NSEvent.mouseLocation
-        let clawdCx = positionX + Self.windowSize.width / 2
-        let clawdCy = walkY + Self.windowSize.height / 2
+        let clawdCx = positionX + windowSize.width / 2
+        let clawdCy = walkY + windowSize.height / 2
         let dx = mouseLoc.x - clawdCx
         let dy = mouseLoc.y - clawdCy
         let dist = sqrt(dx * dx + dy * dy)
@@ -583,7 +629,7 @@ final class ClawdWalkController {
             // 4) chasing 撞墙：只 clamp 位置，不反向（普通漫步才反向）
             let visible = screen.visibleFrame
             let leftBound  = visible.minX + Self.edgeMargin
-            let rightBound = visible.maxX - Self.windowSize.width - Self.edgeMargin
+            let rightBound = visible.maxX - windowSize.width - Self.edgeMargin
             positionX = max(leftBound, min(rightBound, positionX))
 
             win.setFrameOrigin(NSPoint(x: positionX, y: walkY))
@@ -601,7 +647,7 @@ final class ClawdWalkController {
 
         let visible = screen.visibleFrame
         let leftBound  = visible.minX + Self.edgeMargin
-        let rightBound = visible.maxX - Self.windowSize.width - Self.edgeMargin
+        let rightBound = visible.maxX - windowSize.width - Self.edgeMargin
         if positionX < leftBound {
             positionX = leftBound
             direction = 1
@@ -651,7 +697,7 @@ final class ClawdWalkController {
             let candidates = icons.filter { icon in
                 visible.contains(icon.position)
                 // 离 Clawd 当前位置太近的不挑（≤ 80pt，无趣）
-                && abs(icon.position.x - (self.positionX + Self.windowSize.width / 2)) > 80
+                && abs(icon.position.x - (self.positionX + windowSize.width / 2)) > 80
             }
             guard let pick = candidates.randomElement() ?? icons.randomElement() else {
                 self.scheduleNextPatrolIfEnabled(firstTime: false)
@@ -673,7 +719,7 @@ final class ClawdWalkController {
         if let wd = patrolWatchdogAt, now >= wd {
             sniffAITask?.cancel()
             sniffAITask = nil
-            let home = NSPoint(x: notchCenterX(on: screen) - Self.windowSize.width / 2,
+            let home = NSPoint(x: notchCenterX(on: screen) - windowSize.width / 2,
                                y: walkBaseY(on: screen))
             patrol = .returning(target: home)
             patrolWatchdogAt = now.addingTimeInterval(Self.patrolWatchdog)
@@ -699,7 +745,7 @@ final class ClawdWalkController {
             _ = icon
             if now >= until {
                 // 嗅完，回菜单栏
-                let home = NSPoint(x: notchCenterX(on: screen) - Self.windowSize.width / 2,
+                let home = NSPoint(x: notchCenterX(on: screen) - windowSize.width / 2,
                                    y: walkBaseY(on: screen))
                 patrol = .returning(target: home)
                 state.pose = .rest
@@ -753,8 +799,8 @@ final class ClawdWalkController {
     /// 优先站右侧；右侧出屏 → 站左侧
     private func targetWindowOriginNextTo(icon: DesktopIcon, screen: NSScreen) -> NSPoint {
         let visible = screen.visibleFrame
-        let h = Self.windowSize.height
-        let w = Self.windowSize.width
+        let h = windowSize.height
+        let w = windowSize.width
         // 假设 icon.position 是图标 top-left 的 NSScreen 坐标
         // 视觉中心 ≈ icon.position 偏下 32pt 左右（图标 + 标签）
         let iconCenterY = icon.position.y - 32
@@ -809,21 +855,44 @@ final class ClawdWalkController {
         }
     }
 
-    /// 拼给 Hermes 的 prompt —— 严格要求短回复
+    /// 拼给 Hermes 的 prompt —— 严格要求短回复。
+    /// 角色名 / 表情符号根据当前桌宠形象切换，让 AI 短评的口吻跟视觉一致
     private func sniffPrompt(for icon: DesktopIcon) -> String {
         let kind = icon.isFolder ? "文件夹" : "文件"
+        let persona: String
+        switch state.visual {
+        case .clawd:    persona = "Clawd 🦞"
+        case .cloud:    persona = "云朵小精灵 ☁️"
+        case .horse:    persona = "金黄小马 🐴"
+        case .terminal: persona = "终端小精灵 💻"
+        }
         return """
-        你是桌面宠物 Clawd 🦞，正在用户桌面闲逛，发现了一个\(kind)。
+        你是桌面宠物 \(persona)，正在用户桌面闲逛，发现了一个\(kind)。
         请用**不超过 10 个汉字**的一句话，用轻松、好奇、可爱的口吻评论它的名字。
         不要加引号、不要 emoji、不要解释、不要省略号。
         \(kind)名: \(icon.name)
         """
     }
 
-    /// 本地兜底文案 —— Hermes 没配 / 网络挂 / 限流时用
+    /// 本地兜底文案 —— Hermes 没配 / 网络挂 / 限流时用。
+    /// 按当前桌宠形象给不同口吻：Clawd 用嗅嗅 / 螃蟹腔，小马用哒哒 / 嗅嗅，云朵用飘飘 / 看看
     private func localFallbackQuote(for icon: DesktopIcon) -> String {
-        let folderQuotes = ["翻翻这个~", "里面装啥?", "嗯…文件夹", "看着挺鼓", "藏宝盒?"]
-        let fileQuotes   = ["这名字有意思", "什么文件呢?", "嗅嗅~", "瞄一眼", "看着挺新"]
+        let folderQuotes: [String]
+        let fileQuotes: [String]
+        switch state.visual {
+        case .clawd:
+            folderQuotes = ["翻翻这个~", "里面装啥?", "嗯…文件夹", "看着挺鼓", "藏宝盒?"]
+            fileQuotes   = ["这名字有意思", "什么文件呢?", "嗅嗅~", "瞄一眼", "看着挺新"]
+        case .cloud:
+            folderQuotes = ["飘过看看~", "里面有啥?", "云遮着了", "好奇好奇", "藏着什么?"]
+            fileQuotes   = ["飘着瞧瞧~", "新东西?", "嗯～", "看看名字", "挺有意思"]
+        case .horse:
+            folderQuotes = ["哒哒~ 这个", "里面装啥?", "嗅一嗅~", "挺有趣", "进去看看?"]
+            fileQuotes   = ["哒哒哒~", "新东西!", "嗅嗅看", "瞄一眼", "听过这名"]
+        case .terminal:
+            folderQuotes = ["ls 一下?", "cd 进去看", "scan 中…", "$ stat .", "目录树呢"]
+            fileQuotes   = ["cat 试试?", "$ file .", "扫描中…", "新文件!", "看看 metadata"]
+        }
         let pool = icon.isFolder ? folderQuotes : fileQuotes
         return pool.randomElement() ?? "嗅嗅~"
     }
@@ -884,8 +953,8 @@ final class ClawdWalkController {
         state.isBeingDragged = false
 
         // 松手位置：Clawd 中心 NSScreen 坐标
-        let centerX = positionX + Self.windowSize.width / 2
-        let centerY = walkY + Self.windowSize.height / 2
+        let centerX = positionX + windowSize.width / 2
+        let centerY = walkY + windowSize.height / 2
         let clawdCenter = NSPoint(x: centerX, y: centerY)
 
         // 异步抓桌面图标（命中缓存 → 立即；缓存过期 → ~200ms osascript）
@@ -923,7 +992,7 @@ final class ClawdWalkController {
                 // 未命中 → 走回菜单栏（用 patrol .returning 复用走过去的位移逻辑）
                 if let screen = self.targetScreen() {
                     let home = NSPoint(
-                        x: self.notchCenterX(on: screen) - Self.windowSize.width / 2,
+                        x: self.notchCenterX(on: screen) - windowSize.width / 2,
                         y: self.walkBaseY(on: screen)
                     )
                     self.patrol = .returning(target: home)
@@ -967,9 +1036,9 @@ final class ClawdWalkController {
     /// 把气泡窗口对齐到 Clawd 中线上方 4pt
     private func syncBubbleWindow() {
         guard let bw = bubbleWindow else { return }
-        let cx = positionX + Self.windowSize.width / 2
+        let cx = positionX + windowSize.width / 2
         let bx = cx - Self.bubbleSize.width / 2
-        let by = walkY + Self.windowSize.height + 2
+        let by = walkY + windowSize.height + 2
         bw.setFrameOrigin(NSPoint(x: bx, y: by))
     }
 
@@ -1188,10 +1257,16 @@ final class ClawdWalkState {
     var visual: PetVisualKind = .clawd
 }
 
-/// 桌面漫步支持的两种像素宠物视觉。
+/// 桌面漫步支持的像素宠物视觉。
+/// - clawd: 橙色螃蟹（Claude Code mode）
+/// - cloud: indigo 云朵（在线 AI / directAPI mode，自动戴眼镜切 vision）
+/// - horse: 金黄小马（Hermes Gateway mode，飞马 Pegasus 形象）
+/// - terminal: 终端窗口（Codex mode，macOS 风格 Terminal.app + 小腿）
 enum PetVisualKind {
     case clawd
     case cloud
+    case horse
+    case terminal
 }
 
 // MARK: - File Drop View
@@ -1276,23 +1351,51 @@ struct ClawdWalkView: View {
     @State private var glassesProgress: Double = 0
     @State private var glassesHideTask: Task<Void, Never>?
 
-    /// Clawd 像素高度（窗口 44pt，留 7pt 上下 padding 容纳 jumping）
-    private let clawdHeight: CGFloat = 30
+    /// 全局调色板存储 —— @Observable，用户改色后此 View 自动 invalidate 重渲染
+    @State private var paletteStore = PetPaletteStore.shared
+
+    /// 桌宠大小缩放档位（SettingsView 改了立刻生效）
+    @AppStorage(PetWalkSizeScale.storageKey) private var sizeScale: Double = PetWalkSizeScale.default
+
+    /// Clawd 像素高度 —— 基础 30pt × scale 档位
+    private var clawdHeight: CGFloat { 30 * CGFloat(sizeScale) }
+
+    /// 当前桌宠形象对应的调色板（state.visual → AgentMode → palette）
+    private var currentPalette: PetPalette {
+        switch state.visual {
+        case .clawd:    return paletteStore.palette(for: .claudeCode)
+        case .cloud:    return paletteStore.palette(for: .directAPI)
+        case .horse:    return paletteStore.palette(for: .hermes)
+        case .terminal: return paletteStore.palette(for: .codex)
+        }
+    }
 
     var body: some View {
         ZStack {
             // 按当前宠物种类切渲染。两种 sprite 应用同一套 scale/offset/animation modifier，
             // 保证 walk/jump/drag/facing 等手势行为视觉一致。
             Group {
+                let palette = currentPalette
                 switch state.visual {
                 case .clawd:
                     // 把 state.isWalking 传给 ClawdView，让它内部播放官方走路动画
                     // （4 腿对角交替、身体 bob、手臂上下摆 —— 这些是 SVG 原版 keyframe，
                     // 不再用 SwiftUI 外层 bobOffset 重复模拟）
-                    ClawdView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking)
+                    ClawdView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking,
+                              palette: palette)
                 case .cloud:
                     CloudPetView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking,
-                                 glassesProgress: glassesProgress)
+                                 glassesProgress: glassesProgress, palette: palette)
+                case .horse:
+                    // 金黄小马 —— trot 步态 + 鬃毛尾巴飘动由 HorseView 内部自驱
+                    HorseView(pose: state.pose, height: clawdHeight, isWalking: state.isWalking,
+                              palette: palette)
+                case .terminal:
+                    // 终端窗口 —— 光标闪烁 + 代码行抖动由 TerminalView 内部自驱
+                    // isWorking 暂时跟 isWalking 联动（漫步态 = 在敲码氛围）
+                    TerminalView(pose: state.pose, height: clawdHeight,
+                                 isWalking: state.isWalking, isWorking: state.isWalking,
+                                 palette: palette)
                 }
             }
             // 朝向 + 吃东西时的整体缩放（鼓胀 / 缩小消失）合到一个 scaleEffect

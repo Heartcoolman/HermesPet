@@ -17,11 +17,15 @@ struct SettingsView: View {
     /// 画布模式开关（实验性功能）—— ChatView 的 + 菜单根据这个 flag 决定是否显示"新建画布"
     @AppStorage("canvasModeEnabled") private var canvasModeEnabled: Bool = false
     @AppStorage(ChatFontScale.storageKey) private var chatFontScale: Double = ChatFontScale.default
+    /// 桌宠桌面漫步大小档位（5 档：迷你 / 小 / 默认 / 大 / 特大）
+    @AppStorage(PetWalkSizeScale.storageKey) private var petWalkSizeScale: Double = PetWalkSizeScale.default
     /// 当前正在"查看 / 编辑配置"的 mode。
     /// **不绑定 viewModel.agentMode** —— 设置里调这个 Picker 不会切换正在进行的对话的 mode，
     /// 仅决定下面 hermesConfig / claudeCard / codexCard 显示哪一个。
     /// 之前直接 bind viewModel.agentMode 会破坏"对话 mode 锁死"的语义（已发消息的对话被设置面板改了 mode）
     @State private var configViewingMode: AgentMode = .hermes
+    /// 全局调色板存储 —— ColorPicker 改色后通过它更新 + 持久化
+    @State private var paletteStore = PetPaletteStore.shared
 
     enum Category: String, CaseIterable, Identifiable {
         case backend, pet, sound, privacy, system, about
@@ -726,11 +730,11 @@ struct SettingsView: View {
 
             Divider()
 
-            // 桌面漫步统一区 —— 覆盖 Claude (Clawd 螃蟹) 和 在线 AI (云朵小精灵) 两种桌宠
+            // 桌面漫步统一区 —— 覆盖四种桌宠（每个 mode 一种形象）
             VStack(alignment: .leading, spacing: 6) {
                 Label("桌面漫步", systemImage: "figure.walk")
                     .font(.system(size: 13, weight: .medium))
-                Text("从灵动岛跳出，沿菜单栏正下方左右走动。Claude 是 Clawd 🦞，在线 AI 是云朵 ☁️。")
+                Text("从灵动岛跳出，沿菜单栏正下方左右走动。Claude 🦞 / 在线 AI ☁️ / Hermes 🐴 / Codex 💻 各有专属桌宠。")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -739,15 +743,15 @@ struct SettingsView: View {
                 icon: "figure.walk",
                 iconColor: petColor,
                 title: "启用桌面漫步",
-                caption: "总开关。关掉后两种桌宠都不会出现",
+                caption: "总开关。关掉后四种桌宠都不会出现",
                 isOn: $viewModel.clawdWalkEnabled
             )
 
             captionToggle(
                 icon: "infinity",
                 iconColor: petColor,
-                title: "Claude · 自由活动",
-                caption: "Claude 模式下跳过 3 分钟 idle 等待，Clawd 一直在屏幕上玩。在线 AI 切过去时云朵默认立刻出来，不受此项影响",
+                title: "Claude / Hermes / Codex · 自由活动",
+                caption: "Claude / Hermes / Codex 模式下跳过 3 分钟 idle 等待，桌宠一直在屏幕上玩。在线 AI 切过去时云朵默认立刻出来，不受此项影响",
                 isOn: $viewModel.clawdFreeRoamEnabled,
                 disabled: !viewModel.clawdWalkEnabled
             )
@@ -755,25 +759,106 @@ struct SettingsView: View {
             captionToggle(
                 icon: "sparkles.rectangle.stack",
                 iconColor: petColor,
-                title: "Claude · 桌面巡视（嗅文件）",
-                caption: "漫步期间偶尔下到桌面，挑个图标用 Hermes 给一句短评。仅 Clawd 参与，需要 Finder 自动化权限",
+                title: "桌面巡视（嗅文件）",
+                caption: "漫步期间偶尔下到桌面，挑个图标用 Hermes 给一句短评。四种桌宠都会参与，需要 Finder 自动化权限",
                 isOn: $viewModel.clawdDesktopPatrolEnabled,
                 disabled: !viewModel.clawdWalkEnabled
             )
 
             Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Label("交互（两种桌宠通用）", systemImage: "hand.tap")
-                    .font(.system(size: 12, weight: .medium))
+            // 桌宠形象调色 —— 主色定制（派生色自动跟随）
+            VStack(alignment: .leading, spacing: 10) {
+                Label("桌宠形象调色", systemImage: "paintpalette.fill")
+                    .font(.system(size: 13, weight: .medium))
+                Text("调主色 → 顶高光 / 底阴影自动派生。鬃毛 / 翅膀 / 火焰 / LED 等保留默认色不变。")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                interactionTip("单击 / 双击", "打开聊天窗（不切换模式）")
-                interactionTip("鼠标 hover", "暂停漫步")
-                interactionTip("拖文件给它", "Clawd 吃掉并交给 AI 看（仅 Claude 模式）")
+
+                paletteRow(label: "Claude · Clawd 🦞", mode: .claudeCode)
+                paletteRow(label: "在线 AI · 云朵 ☁️", mode: .directAPI)
+                paletteRow(label: "Hermes · 小马 🐴", mode: .hermes)
+                paletteRow(label: "Codex · 喷射机器人 🤖", mode: .codex)
             }
             .padding(12)
             .background(Color.secondary.opacity(0.06))
             .cornerRadius(8)
+
+            // 桌宠大小档位
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label("桌宠大小", systemImage: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Text("\(Int(petWalkSizeScale * 100))%")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Picker("桌宠大小档位", selection: $petWalkSizeScale) {
+                    ForEach(PetWalkSizeScale.presets, id: \.self) { scale in
+                        Text(PetWalkSizeScale.label(for: scale)).tag(scale)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .onChange(of: petWalkSizeScale) { _, _ in
+                    // 通知 ClawdWalkController：已显示中的桌宠 setFrame 跟随新尺寸
+                    NotificationCenter.default.post(name: PetWalkSizeScale.didChangeNotification, object: nil)
+                }
+
+                Text("仅作用于桌面漫步形象。灵动岛桌宠受刘海物理高度约束，大小不变。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.06))
+            .cornerRadius(8)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label("交互（四种桌宠通用）", systemImage: "hand.tap")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                interactionTip("单击 / 双击", "打开聊天窗（不切换模式）")
+                interactionTip("鼠标 hover", "暂停漫步")
+                interactionTip("拖文件给它", "桌宠吃掉并交给 AI 看（仅 Claude 模式）")
+            }
+            .padding(12)
+            .background(Color.secondary.opacity(0.06))
+            .cornerRadius(8)
+        }
+    }
+
+    /// 单个 mode 的调色行：ColorPicker + 重置默认
+    @ViewBuilder
+    private func paletteRow(label: String, mode: AgentMode) -> some View {
+        HStack(spacing: 10) {
+            Text(label)
+                .font(.system(size: 12))
+                .frame(width: 170, alignment: .leading)
+            ColorPicker(
+                "",
+                selection: Binding<Color>(
+                    get: { paletteStore.palette(for: mode).primary },
+                    set: { newColor in paletteStore.updatePrimary(for: mode, color: newColor) }
+                ),
+                supportsOpacity: false
+            )
+            .labelsHidden()
+            .frame(width: 44)
+
+            Button("重置默认") {
+                paletteStore.resetToDefault(for: mode)
+            }
+            .font(.system(size: 11))
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+
+            Spacer()
         }
     }
 
