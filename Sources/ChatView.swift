@@ -9,6 +9,11 @@ struct ChatView: View {
     /// 流式输出就不再强行 scrollTo bottom 抢滚动。
     @State private var isMessagesNearBottom = true
 
+    /// 聊天正文字号缩放（⌘+ / ⌘- / ⌘0 控制）—— 持久化在 UserDefaults
+    @AppStorage(ChatFontScale.storageKey) private var chatFontScale: Double = ChatFontScale.default
+    /// ⌘+/⌘- 触发后短暂显示当前档位 toast（"字号 115%"），2s 自动消失
+    @State private var fontScaleToast: String? = nil
+
     private static let messagesScrollSpace = "HermesPetMessagesScroll"
     private static let messagesBottomAnchorID = "HermesPetMessagesBottomAnchor"
 
@@ -62,6 +67,18 @@ struct ChatView: View {
             }
         }
         .animation(AnimTok.smooth, value: viewModel.errorMessage)
+        // 字号 toast —— ⌘+/⌘-/⌘0 触发后 2s 自动消失
+        .overlay(alignment: .top) {
+            if let label = fontScaleToast {
+                FontScaleToast(label: label)
+                    .padding(.top, 56)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(101)
+            }
+        }
+        .animation(AnimTok.smooth, value: fontScaleToast)
+        // 把 scale 注入 Environment，MessageBubble / MarkdownTextView 用它来算字号
+        .environment(\.chatFontScale, chatFontScale)
         // 隐藏按钮组：承载键盘快捷键，不参与视觉
         .background { keyboardShortcutsLayer }
         // 新建画布的 Sheet —— 让用户选模板 + 填主题 + 上传产品参考图
@@ -147,10 +164,45 @@ struct ChatView: View {
                 }
             }
             .keyboardShortcut(.delete, modifiers: .command)
+
+            // 字号缩放（Chrome 风格）—— ⌘+ / ⌘= / ⌘- / ⌘0
+            // ⌘+ 和 ⌘= 都触发放大（=/+ 是同一物理键，US/CN 键盘 shift 与否的区别）
+            Button("Bigger Font") { bumpFontScale(.up) }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("Bigger Font (=)") { bumpFontScale(.up) }
+                .keyboardShortcut("=", modifiers: .command)
+            Button("Smaller Font") { bumpFontScale(.down) }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("Reset Font Scale") { bumpFontScale(.reset) }
+                .keyboardShortcut("0", modifiers: .command)
         }
         .frame(width: 0, height: 0)
         .opacity(0)
         .accessibilityHidden(true)
+    }
+
+    /// 字号缩放动作 —— 改 AppStorage + 弹 toast 2s 自动消失
+    private enum FontScaleAction { case up, down, reset }
+    private func bumpFontScale(_ action: FontScaleAction) {
+        let oldScale = chatFontScale
+        let newScale: Double = switch action {
+        case .up:    ChatFontScale.cycleUp(from: oldScale)
+        case .down:  ChatFontScale.cycleDown(from: oldScale)
+        case .reset: ChatFontScale.default
+        }
+        if newScale != oldScale {
+            chatFontScale = newScale
+        }
+        // 即使档位没变也弹 toast（让用户知道已经到顶/底了）
+        fontScaleToast = ChatFontScale.displayLabel(for: newScale)
+        // 2s 后自动清空（用 task ID 防多次触发竞态）
+        let snapshot = fontScaleToast
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await MainActor.run {
+                if fontScaleToast == snapshot { fontScaleToast = nil }
+            }
+        }
     }
 
     // MARK: - Header
@@ -325,7 +377,12 @@ struct ChatView: View {
                                     conversationID: viewModel.activeConversationID,
                                     onRetry: { viewModel.retryLastMessage() },
                                     onChoiceSelected: { choice in
-                                        viewModel.submitVoiceInput(choice)
+                                        // 仅"填入输入框"，由用户手动按回车发送 —— 避免叙述性
+                                        // 编号列表（"先做 A / 再做 B / 最后 C"）被当成可点选项误触发送。
+                                        viewModel.inputText = choice
+                                        // 通知输入框抢回 firstResponder，让用户可以立即按回车
+                                        NotificationCenter.default.post(
+                                            name: .init("HermesPetFocusInputField"), object: nil)
                                     },
                                     onPinTask: { task in
                                         // 📌 Pin → 创建任务 Pin 到桌面
@@ -476,6 +533,35 @@ struct DragOverlay: View {
                         style: StrokeStyle(lineWidth: 2, dash: [10, 6]))
                 .padding(6)
         )
+    }
+}
+
+// MARK: - 字号 Toast
+
+/// ⌘+ / ⌘- / ⌘0 后短暂显示当前档位 —— 紧凑胶囊，2s 自动消失
+struct FontScaleToast: View {
+    let label: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "textformat.size")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.thinMaterial)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(.primary.opacity(0.12), lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 6, y: 3)
     }
 }
 
@@ -1073,7 +1159,7 @@ struct OnboardingCard: View {
                     Text("先选个 AI 服务商再聊天")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.primary)
-                    Text("点这里打开设置 · 内置 DeepSeek / 智谱 / Kimi / OpenAI 预设")
+                    Text("点这里打开设置 · 内置 DeepSeek / 智谱 / Kimi / MiniMax / OpenAI 预设")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

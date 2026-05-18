@@ -5,6 +5,13 @@ import ServiceManagement
 @MainActor
 @Observable
 final class ChatViewModel {
+    private static let completeThinkBlockRegex = try! NSRegularExpression(
+        pattern: #"(?is)<think\b[^>]*>.*?</think\s*>"#
+    )
+    private static let trailingThinkBlockRegex = try! NSRegularExpression(
+        pattern: #"(?is)<think\b[^>]*>.*\z"#
+    )
+
     /// 所有对话（≤ kMaxConversations 个）
     var conversations: [Conversation] = []
     /// 当前激活对话的 ID —— UI 上"高亮"的那个胶囊
@@ -932,10 +939,11 @@ final class ChatViewModel {
                 for try await delta in stream {
                     try Task.checkCancellation()
                     fullContent += delta
+                    let visibleContent = Self.sanitizeAssistantVisibleContent(fullContent)
                     let now = Date()
                     if now.timeIntervalSince(lastUpdate) >= throttle {
                         self.updateMessage(conversationID: targetConversationID, messageID: assistantMessageID) { msg in
-                            msg.content = fullContent
+                            msg.content = visibleContent
                         }
                         lastUpdate = now
                     }
@@ -947,20 +955,21 @@ final class ChatViewModel {
                 let imagePaths: [String] = generatedImages.isEmpty
                     ? []
                     : storage.persistImages(generatedImages, forMessage: assistantMessageID)
+                let visibleContent = Self.sanitizeAssistantVisibleContent(fullContent)
                 self.updateMessage(conversationID: targetConversationID, messageID: assistantMessageID) { msg in
-                    msg.content = fullContent.isEmpty ? "(没有响应)" : fullContent
+                    msg.content = visibleContent.isEmpty ? "(没有响应)" : visibleContent
                     msg.isStreaming = false
                     if !generatedImages.isEmpty {
                         msg.images = generatedImages
                         msg.imagePaths = imagePaths
                     }
                 }
-                didSucceed = !fullContent.isEmpty || !generatedImages.isEmpty
+                didSucceed = !visibleContent.isEmpty || !generatedImages.isEmpty
 
                 // 检测 AI 回复末尾是否有连续编号列表 → 灵动岛弹出选项下拉菜单
                 // 仅当此回复属于当前激活对话才弹（后台对话不打扰用户当前注意力）
                 if didSucceed, targetConversationID == self.activeConversationID,
-                   let choices = Self.extractTrailingChoices(from: fullContent) {
+                   let choices = Self.extractTrailingChoices(from: visibleContent) {
                     NotificationCenter.default.post(
                         name: .init("HermesPetChoiceListReady"),
                         object: nil,
@@ -1107,6 +1116,27 @@ final class ChatViewModel {
             }
         }
         return items.count >= 2 ? items : nil
+    }
+
+    /// 模型返回里的 `<think>...</think>` 是推理草稿，不应该进聊天气泡。
+    /// 同时处理流式中尚未闭合的 `<think>`，避免先闪出思考过程再被最终答案替换。
+    static func sanitizeAssistantVisibleContent(_ content: String) -> String {
+        guard content.range(of: "<think", options: [.caseInsensitive]) != nil else {
+            return content
+        }
+        let fullRange = NSRange(content.startIndex..<content.endIndex, in: content)
+        let withoutCompleteBlocks = completeThinkBlockRegex.stringByReplacingMatches(
+            in: content,
+            range: fullRange,
+            withTemplate: ""
+        )
+        let trailingRange = NSRange(
+            withoutCompleteBlocks.startIndex..<withoutCompleteBlocks.endIndex,
+            in: withoutCompleteBlocks
+        )
+        return trailingThinkBlockRegex
+            .stringByReplacingMatches(in: withoutCompleteBlocks, range: trailingRange, withTemplate: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 长对话历史裁剪 —— 避免每次重发完整历史导致：

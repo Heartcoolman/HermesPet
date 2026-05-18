@@ -17,7 +17,7 @@
 - [x] 流式打字机节流：40ms 间隔刷新，减少 SwiftUI 重渲染压力
 - [x] MessageBubble 跟随 mode 切换头像/标签（Hermes 绿 / Claude 橙 / Codex 青）
 - [x] 图标统一：兔子 → sparkle ✦（Claude 品牌风）
-- [x] AI 编号列表自动渲染为可点击选项卡片：点击直接发送对应内容
+- [x] AI 编号列表自动渲染为可点击选项卡片：**点击填入输入框**（由用户确认后按回车发送，避免叙述性序号被误触发送）
 
 ## [P1] 功能增强 ✅
 - [x] 对话历史持久化（JSON 存储 + 自动保存/加载 + 旧版自动迁移）
@@ -33,6 +33,7 @@
 - [x] **接入 OpenAI Codex CLI**：第三种 AgentMode，支持代码 + 生图
 - [x] **Codex 生成的图片自动显示在 assistant 气泡里**（单图大显示 / 多图 2 列网格 / 点击放大）
 - [x] 音效系统：按住语音 + 任务完成两个时机的音效可在设置里换 / 关掉
+- [x] **提示音扩展**（2026-05-17）：5 个事件可独立开关 —— 启动语音 / AI 回复完成 / 拖文件入对话 / 发送消息 / 出错时；每个事件可选 14 个 macOS 系统音 或拖入自己的 mp3/wav/m4a/aiff 当自定义音效；新建 `SoundManager.swift` 统一播放（自定义文件用 NSSound delegate 保活避免播一半被释放）
 
 ## [P2] 技术质量 ✅
 - [x] 菜单栏图标状态指示（绿色=连接正常 / 红色=断开 / 灰色=未配置）
@@ -59,6 +60,10 @@
 ---
 
 ## [P0-Bug] 🔥 优先修的 Bug
+- [x] **PR #16 cherry-pick 1: 在线 AI 新增 MiniMax 服务商** —— ProviderPreset 加 `minimax`：baseURL `https://api.minimaxi.com/v1`，默认/平衡/深度 `MiniMax-M2.7`，快速 `MiniMax-M2.7-highspeed`，注册入口 `https://platform.minimaxi.com/`。配套：ReasoningProxy.upstreamBaseURLs 加 minimax 路由、OpenCodeConfigGenerator.identityFor 加 minimax 分支、SettingsView.keyPlaceholder 加 minimax 占位、README/APIClient/Models/OpenCodeClient 注释加 MiniMax。无 vision model（拖图给清晰错误）
+- [x] **PR #16 cherry-pick 2: 过滤 `<think>` 推理草稿** —— ChatViewModel.sanitizeAssistantVisibleContent 用两个 NSRegularExpression（完整块 + 流式未闭合尾部）剥掉 `<think>...</think>`，流式 / 最终消息 / extractTrailingChoices 全部基于清洗后正文。修 MiniMax 等服务商把推理过程写到正文里污染气泡的问题
+- [x] **PR #16 cherry-pick 5: OpenCodeHTTPClient 兜底 + 错误处理** —— (1) 嵌套 `StreamState` 类追踪本轮是否 yield 过 text；SSE delta 来时 `markTextYielded`，没 delta 时从 `message.part.updated` 完整 text part 或 POST `/message` 返回体里补一次正文，修 MiniMax 等不发 delta 的 provider 显示「(没有响应)」(2) `extractOpenCodeError` 识别 200 + body 里 `info.error.data.message`（如 `file part media type ...xlsx not supported`），转人话提示用户切格式 (3) POST 失败时主动 `clearSession(for:)` 让下条消息新建恢复，避免坏 session 复用 (4) DeepSeek 硬编码 vision check 改通用 `preset?.visionModel == nil`（DeepSeek / MiniMax 等都走这条）
+- [x] **PR #16 cherry-pick 6: OpenCodeConfigGenerator 配置 Key 一致性** —— (1) `effectiveAPIKey` 改用 `object(forKey:) != nil` 检测服务商专属 key 是否被显式设置过；即使为空字符串也以它为准，不再回退到旧全局 `directAPIKey`，避免清空某 provider 的 key 后仍偷偷用旧 key (2) opencode 偏好读取 key 从 `directResponsePreference` 改成 `directAPIResponsePreference`，修设置页切快速/平衡/深度时提示模型和实际模型不同步
 - [x] **在线 AI 切到 opencode HTTP API 彻底根治 v1.2.x "(没有响应)" (v1.2.3)** —— 新建 `OpenCodeHTTPClient.swift` (~520 行) 走 server REST API，替代之前 `opencode run` subprocess。Phase 1: OpenCodeServerManager 加 `prepareGlobalConfigDir()` 让 serve cwd 指向 `~/Library/Application Support/HermesPet/opencode-global/`，serve 启动时加载完整 4 家 provider（之前 server 只认 deepseek+anthropic+opencode）。Phase 2: ensureSession 通过 POST /session 创建会话（绑定 directory + agent=build + model），订阅 GET /event 长连接 SSE 拿 `message.part.delta` 流式 yield。Phase 3: 文件附件通过 FilePartInput 传，图片用 base64 data URL（文件 file:// 会被当文本传，model 看不到真图），多 mime 字节头检测。Phase 4: 设置改 API Key/服务商 → 防抖 800ms 后 restart server 让新配置热生效。彻底消除 subprocess EOF 假性结束问题，启动延迟 800ms→50ms
 - [x] **在线 AI 拖图被模型说「找不到图」(v1.2.3 hotfix)** —— 拖图到桌宠时 `handleFileDropped` 用了文件版默认 prompt「请帮我看看这个文件「image.png」」，AI 拿到 prompt 去用 Read 工具找文件名 → 找不到。修法：handleFileDropped 内按 isImage 分流 prompt，图片用「这张图里是什么？请帮我看看」、文件保留原版
 - [x] **拖图比剪贴板粘贴慢 5 倍 (v1.2.3)** —— DragDropUtil.processFile 之前对所有图片格式都走 NSImage decode → TIFF → PNG re-encode，200KB JPG 变 800KB+ PNG。修法：PNG/JPG/JPEG/GIF 直接 `try Data(contentsOf:)` 透传原 bytes；只有 HEIC/WEBP/BMP/TIFF（vision API 不通用的）才转 PNG。OpenCodeHTTPClient.buildParts 配套加 detectImageMime 按字节头检测真实 mime（避免 JPG 被错标 image/png）
@@ -101,7 +106,8 @@
 ## [P1-体验] 体验型升级
 
 - [x] **按住语音时实时显示识别字幕** —— 新建 VoiceTranscriptOverlayController（独立 NSWindow），订阅 HermesPetVoiceStarted/Partial/Finished/Cancelled；灵动岛下方约 18pt 浮一个 ultraThinMaterial Capsule 显示"🎙 正在听… / 实时识别文字"，宽度按字数自适应（220~700pt）。让用户按住时就能确认说没说对，不必等松手
-- [x] **键盘快捷键**：`⌘N` 新对话 / `⌘[` 上一对话 / `⌘]` 下一对话 / `⌘1/2/3` 直达序号 / `⌘⌫` 关闭对话（⌘W 留给关窗口）
+- [x] **键盘快捷键**：`⌘N` 新对话 / `⌘[` 上一对话 / `⌘]` 下一对话 / `⌘1~⌘8` 直达序号 / `⌘⌫` 关闭对话（⌘W 留给关窗口）/ `⌘+ ⌘- ⌘0` 缩放聊天字号
+- [x] **聊天字号可调（Chrome 风格）** —— `⌘+` 放大 / `⌘-` 缩小 / `⌘0` 恢复，五档（85% / 100% / 115% / 130% / 150%），AppStorage 持久化。仅缩放消息正文 / 代码块 / 表格 / ChoiceCard / Markdown header，不影响输入栏 / 设置面板 / 灵动岛 chrome。设置 → 系统页也有 segmented Picker 入口给不知道快捷键的用户。改 ChoiceCard 点击行为：现在**填入输入框**而非直接发送，避免叙述性编号列表被误触
 - [ ] 跨对话搜索历史消息
 - [x] **拖入文档（PDF / txt / md）让 AI 读** —— ChatView 顶层全窗口接收拖入；DragDropUtil 统一处理：图片→pendingImages、文档→只回传 URL（不读全文）；拖入时全窗口出现 tint 虚线框 + "释放以附加"卡片提示
 - [x] **拖入文档改为传路径而非读全文** —— 拖入只记录 URL 到 `pendingDocuments`，发送时 Claude 模式把父目录追加到 `--add-dir`、prompt 末尾附路径让 Claude 用 Read 工具自己读；Codex 同样在 prompt 写路径靠已绕沙箱的 shell 读；Hermes 模式直接 errorMessage 拒绝（OpenAI API 没法访问本地）。ChatInputField 增 DocumentChip 横向列表显示附件，hover × 删除，tooltip 显示完整路径

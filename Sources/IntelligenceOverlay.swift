@@ -23,11 +23,8 @@ final class IntelligenceOverlayController {
         hostingView?.rootView = IntelligenceGlowView(isActive: true)
         window?.orderFront(nil)
 
-        // 召唤音效 —— 从 UserDefaults 读，用户可在设置中选择 / 关闭
-        let soundName = UserDefaults.standard.string(forKey: "voiceStartSound") ?? "Funk"
-        if !soundName.isEmpty {
-            NSSound(named: soundName)?.play()
-        }
+        // 召唤音效 —— 由 SoundManager 统一管理（用户可在设置选 / 关 / 换自定义音频文件）
+        SoundManager.play(.voiceStart)
     }
 
     func hide() {

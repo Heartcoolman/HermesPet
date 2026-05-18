@@ -19,6 +19,10 @@ struct MarkdownTextView: View {
     /// 卡片主题色（跟当前 mode 联动：Hermes 绿 / Claude 橙 / Codex 青）
     var tint: Color = .accentColor
 
+    /// 字号缩放因子（由 ChatView 经 Environment 注入）—— 应用到 header / 代码块 / 表格 / ChoiceCard
+    /// 文本内容（InlineMarkdownView 的 Text）自动随容器 .font() 缩放，不用这里另传
+    @Environment(\.chatFontScale) private var fontScale: Double
+
     var body: some View {
         let blocks = parseBlocks(content)
         VStack(alignment: .leading, spacing: 6) {
@@ -56,11 +60,12 @@ struct MarkdownTextView: View {
 
     @ViewBuilder
     private func headerView(level: Int, text: String) -> some View {
-        let font: Font = switch level {
-        case 1: .title2.bold()
-        case 2: .title3.bold()
-        case 3: .headline
-        default: .body.bold()
+        // Header 基础字号（用具体 pt 而非语义 .title2 是为了精确跟随 fontScale 缩放）
+        let baseSize: CGFloat = switch level {
+        case 1: 19
+        case 2: 17
+        case 3: 15
+        default: 14
         }
         let padding: CGFloat = switch level {
         case 1: 4
@@ -68,7 +73,7 @@ struct MarkdownTextView: View {
         default: 2
         }
         InlineMarkdownView(text: text)
-            .font(font)
+            .font(.system(size: baseSize * fontScale, weight: .bold))
             .padding(.top, padding)
     }
 
@@ -300,7 +305,10 @@ struct MarkdownTextView: View {
 
 // MARK: - 选项卡片列表
 
-/// AI 给出编号选项时，渲染成一组可点击卡片。点击 = 把那项内容作为新消息发送。
+/// AI 给出编号选项时，渲染成一组可点击卡片。
+/// 点击 = 把那项内容填入输入框（**不直接发送**，由用户确认后按回车）。
+/// 这是有意为之 —— 防止 AI 用编号列表做纯叙述时（"先做 A / 再做 B"）被当成选项误触
+/// （issue 反馈："点击后发出去一条无意义的序号消息打断对话节奏"）。
 struct ChoiceCardList: View {
     let items: [String]
     let tint: Color
@@ -325,15 +333,16 @@ struct ChoiceCard: View {
     let onTap: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.chatFontScale) private var fontScale: Double
 
     var body: some View {
         Button(action: onTap) {
             HStack(alignment: .top, spacing: 8) {
                 // 编号徽章
                 Text("\(index)")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.system(size: 11 * fontScale, weight: .bold))
                     .foregroundStyle(isHovering ? Color.white : tint)
-                    .frame(width: 20, height: 20)
+                    .frame(width: 20 * fontScale, height: 20 * fontScale)
                     .background(
                         Circle()
                             .fill(isHovering ? tint : tint.opacity(0.15))
@@ -341,14 +350,14 @@ struct ChoiceCard: View {
 
                 // 选项文本
                 InlineMarkdownView(text: text)
-                    .font(.system(size: 13))
+                    .font(.system(size: 13 * fontScale))
                     .foregroundStyle(.primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                // hover 时显示"发送"提示
+                // hover 时显示"填入输入框"提示（点击不直接发送，仅填入让用户确认）
                 if isHovering {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 10))
+                    Image(systemName: "text.cursor")
+                        .font(.system(size: 10 * fontScale))
                         .foregroundStyle(tint)
                         .transition(.opacity)
                 }
@@ -365,7 +374,7 @@ struct ChoiceCard: View {
             )
         }
         .buttonStyle(.plain)
-        .help("点击发送：\(text)")
+        .help("填入输入框：\(text)")
         .onHover { hovering in
             withAnimation(AnimTok.snappy) { isHovering = hovering }
         }
@@ -386,6 +395,8 @@ struct TableBlockView: View {
     let headers: [String]
     let alignments: [MarkdownTextView.TableColumnAlignment]
     let rows: [[String]]
+
+    @Environment(\.chatFontScale) private var fontScale: Double
 
     private var columnCount: Int { headers.count }
 
@@ -457,7 +468,7 @@ struct TableBlockView: View {
                     .multilineTextAlignment(textAlign)
             }
         }
-        .font(.system(size: 12, weight: isHeader ? .semibold : .regular))
+        .font(.system(size: 12 * fontScale, weight: isHeader ? .semibold : .regular))
         .frame(maxWidth: .infinity, alignment: frameAlign)
         .padding(.horizontal, 10)
         .padding(.vertical, isHeader ? 7 : 6)
@@ -497,6 +508,7 @@ struct CodeBlockView: View {
     let language: String
     let code: String
     @State private var copied = false
+    @Environment(\.chatFontScale) private var fontScale: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -523,8 +535,9 @@ struct CodeBlockView: View {
             .background(.primary.opacity(0.08))
 
             ScrollView(.horizontal, showsIndicators: true) {
+                // .caption ≈ 12pt（macOS）—— 用具体 pt 让代码块也随 fontScale 缩放
                 Text(code)
-                    .font(.system(.caption, design: .monospaced))
+                    .font(.system(size: 12 * fontScale, design: .monospaced))
                     .foregroundStyle(.primary)
                     .padding(10)
                     .textSelection(.enabled)

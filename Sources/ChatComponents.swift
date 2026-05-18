@@ -4,6 +4,9 @@ import PDFKit
 
 // MARK: - Message Bubble
 
+/// 消息正文基础字号（13pt）—— scale 应用到此基数上。Header / 代码块等用各自基数也走同一 scale
+private let kMessageBaseFontSize: CGFloat = 13
+
 struct MessageBubbleView: View {
     let message: ChatMessage
     /// 当前对话对象，用来决定 assistant 头像和角色名
@@ -23,6 +26,9 @@ struct MessageBubbleView: View {
     @State private var didCopy = false
     @State private var didPin = false
     @State private var pinShake = false
+
+    /// 字号缩放（由 ChatView 经 Environment 注入）—— 应用到正文 Text / Markdown / 代码块
+    @Environment(\.chatFontScale) private var fontScale: Double
 
     private var isUser: Bool { message.role == .user }
     /// assistant 内容以 "❌" 开头 → 出错消息，可重试
@@ -193,7 +199,7 @@ struct MessageBubbleView: View {
             // 文本气泡（蓝色渐变）—— 仅在内容非占位时显示
             if !isPlaceholderText(message.content) {
                 Text(message.content)
-                    .font(.system(size: 13))
+                    .font(.system(size: kMessageBaseFontSize * fontScale))
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -231,7 +237,7 @@ struct MessageBubbleView: View {
                             onChoiceSelected: nil,             // 流式期间不响应选项点击
                             tint: assistantTint
                         )
-                        .font(.system(size: 13))
+                        .font(.system(size: kMessageBaseFontSize * fontScale))
                         TypingCursor(color: assistantTint)
                     }
                 }
@@ -243,7 +249,7 @@ struct MessageBubbleView: View {
                     onDispatchTask: onDispatchTask,
                     tint: assistantTint
                 )
-                .font(.system(size: 13))
+                .font(.system(size: kMessageBaseFontSize * fontScale))
             }
             // assistant 返回的图片（主要来自 Codex 模式的生图）—— 网格展示
             if !message.images.isEmpty {
@@ -627,6 +633,23 @@ struct SendOnEnterTextEditor: NSViewRepresentable {
                 }
             }
         }
+        // 监听"外部要求 focus 输入框"的通知（用户点 ChoiceCard 后会发，让输入框抢回 firstResponder
+        // 这样填入文字后用户可以立刻按回车发送，不用再点一下输入框）
+        context.coordinator.focusObserver = NotificationCenter.default.addObserver(
+            forName: .init("HermesPetFocusInputField"),
+            object: nil,
+            queue: .main
+        ) { [weak textView] _ in
+            // queue: .main 决定了回调一定在主线程，但闭包本身是 Sendable，
+            // 访问 NSTextView/NSWindow 的 @MainActor 属性需要显式 hop 到 MainActor
+            MainActor.assumeIsolated {
+                guard let tv = textView, let window = tv.window else { return }
+                window.makeFirstResponder(tv)
+                // 光标放到文末（填入的文字用户大概率是想直接发送或在末尾追加）
+                let end = (tv.string as NSString).length
+                tv.setSelectedRange(NSRange(location: end, length: 0))
+            }
+        }
         return scrollView
     }
 
@@ -674,9 +697,17 @@ struct SendOnEnterTextEditor: NSViewRepresentable {
         /// "SwiftUI 在 echo 我们的更新"（lastSyncedText == text）跟"真的外部 set"（!=），
         /// 避免在 race 期间把用户刚输入的字符覆盖回空（详见 updateNSView 注释）
         var lastSyncedText: String = ""
+        /// HermesPetFocusInputField 通知的 observer token —— deinit 时移除避免泄漏
+        var focusObserver: NSObjectProtocol?
 
         init(parent: SendOnEnterTextEditor) {
             self.parent = parent
+        }
+
+        deinit {
+            if let obs = focusObserver {
+                NotificationCenter.default.removeObserver(obs)
+            }
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

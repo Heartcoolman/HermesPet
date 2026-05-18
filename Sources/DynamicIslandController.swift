@@ -32,6 +32,16 @@ final class DynamicIslandController {
     /// 点击灵动岛胶囊时回调（由 AppDelegate 注册）
     var onTapped: (() -> Void)?
 
+    /// NSEvent 鼠标监听器（local + global）—— NSWindow.ignoresMouseEvents=true 后 SwiftUI 内部
+    /// 收不到任何鼠标事件，hover/click 完全由这俩 monitor 在屏幕坐标系自检 hit area 触发
+    private var localEventMonitor: Any?
+    private var globalEventMonitor: Any?
+    /// controller 端持有的 hover 状态 —— hit area state machine 的 single source of truth。
+    /// false 时用 idle hit area 检测进入；true 时用 hover hit area 检测维持/离开
+    private var isMouseHovering: Bool = false
+    /// positionWindow 算完几何后缓存到这里，computeHitRectInScreen 用它算 hit 区屏幕坐标
+    private var cachedNotchHeight: CGFloat = 32
+
     // MARK: - 形态参数（要改观感就调这四个）
 
     /// 默认（idle）状态：露在刘海下方的高度（极少，让耳朵"融入"刘海高度）
@@ -60,8 +70,13 @@ final class DynamicIslandController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
-        panel.ignoresMouseEvents = false
-        panel.acceptsMouseMovedEvents = true
+        // ⚠️ NSWindow 完全不接事件 —— 鼠标穿透到 menubar 不再"占据"任何事件响应空间。
+        // hover/click 的 hit-test 完全搬到 controller 端用 NSEvent globalMonitor 自检（见下面
+        // localEventMonitor / globalEventMonitor），跟 SwiftUI .onContinuousHover/.onTapGesture
+        // 这套"NSWindow contentView 必须接事件才能触发"路线相比，根本上避免 NSWindow 物理 280×74pt
+        // 遮挡菜单栏其他区域可点击范围
+        panel.ignoresMouseEvents = true
+        panel.acceptsMouseMovedEvents = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.isReleasedWhenClosed = false
         self.pillWindow = panel
@@ -81,11 +96,77 @@ final class DynamicIslandController {
         // hostingController.view 是 NSHostingView 实例（私有类型），但 NSView 接口足够挂 gesture
         let hostingNSView = hosting.view
         hostingNSView.autoresizingMask = [.width, .height]
-        let click = NSClickGestureRecognizer(target: self, action: #selector(toggleChat))
-        hostingNSView.addGestureRecognizer(click)
         hostingNSView.wantsLayer = true
 
         positionWindow()
+
+        // NSEvent monitor 必须在所有 stored property 赋值完之后才能在 closure 里安全 capture self。
+        // 屏幕坐标系监听鼠标位置：本 app 内事件走 localMonitor，其他 app（menubar 等）事件走 globalMonitor。
+        // closure 在 nonisolated 上下文，跳 main 调 handleMouseEvent（@MainActor）
+        localEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] event in
+            let type = event.type
+            DispatchQueue.main.async { self?.handleMouseEvent(type: type) }
+            return event
+        }
+        globalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] event in
+            let type = event.type
+            DispatchQueue.main.async { self?.handleMouseEvent(type: type) }
+        }
+    }
+
+    // DynamicIslandController 是 AppDelegate 持有的单例，app 生命周期内不释放 → 不写 deinit
+    // 清理 NSEvent monitor（Swift 6 nonisolated deinit 也访问不了 @MainActor 属性）
+
+    // MARK: - NSEvent 屏幕坐标 hit-test
+
+    /// 全局鼠标移动 / 点击都走这里。判断鼠标在 hit area 屏幕矩形内 → 更新 hover 状态 / 触发 click
+    private func handleMouseEvent(type: NSEvent.EventType) {
+        let mouseLoc = NSEvent.mouseLocation   // 屏幕坐标
+        let hitRect = computeHitRectInScreen(forHovered: isMouseHovering)
+        let inside = hitRect.contains(mouseLoc)
+
+        switch type {
+        case .mouseMoved:
+            if inside != isMouseHovering {
+                isMouseHovering = inside
+                NotificationCenter.default.post(
+                    name: .init("HermesPetIslandHoverChanged"),
+                    object: nil,
+                    userInfo: ["hovering": inside]
+                )
+            }
+        case .leftMouseDown:
+            // click 用**当前 hover 状态**对应的 hit area —— 跟视觉一致：
+            // - idle 状态（水滴扁形态）：必须严格在刘海正下方小矩形内才 click
+            // - hover 状态（水滴展开）：水滴本身 + 8pt buffer 都能 click
+            // 之前一律用 hover hit area 判断会导致：idle 状态下用户在水滴下方视觉空白区点击
+            // 也能弹出聊天窗（用户感受"没碰到灵动岛"）
+            let clickRect = computeHitRectInScreen(forHovered: isMouseHovering)
+            if clickRect.contains(mouseLoc) {
+                onTapped?()
+            }
+        default:
+            break
+        }
+    }
+
+    /// 算 hit area 在屏幕坐标系的矩形。NSWindow contentView 内 (inset, 0, w - 2*inset, hitHeight)
+    /// 顶端贴 NSWindow 顶 = 屏幕顶；转屏幕坐标 y 向上时顶端 y = window.maxY，底端 y = window.maxY - hitHeight
+    private func computeHitRectInScreen(forHovered hovered: Bool) -> NSRect {
+        let f = pillWindow.frame
+        let hitHeight: CGFloat = hovered
+            ? (cachedNotchHeight + hoverDrop)
+            : max(0, cachedNotchHeight - 4)
+        let inset: CGFloat = hovered
+            ? max(0, (idleExtraWidth - hoverExtraWidth) / 2 - 8)
+            : max(0, idleExtraWidth / 2 - 10)
+
+        return NSRect(
+            x: f.minX + inset,
+            y: f.maxY - hitHeight,
+            width: max(0, f.width - 2 * inset),
+            height: hitHeight
+        )
     }
 
     // MARK: - Public
@@ -139,6 +220,8 @@ final class DynamicIslandController {
             return 180
         }()
         let actualNotchHeight: CGFloat = hasNotch ? safeArea.top : 28
+        // 缓存给 computeHitRectInScreen 用（NSEvent monitor 自检 hit area 时算屏幕坐标）
+        self.cachedNotchHeight = actualNotchHeight
 
         // 灵动岛 NSWindow 永远保持常规尺寸 —— **绝对不能改 frame**。
         // 任何 frame 变化（即便瞬切）都会触发 NSHostingView.invalidateSafeAreaInsets →
@@ -229,10 +312,6 @@ struct DynamicIslandPillView: View {
     @State private var hoverDrop: CGFloat = 14
     @State private var hoverExtraWidth: CGFloat = 4
 
-    /// NSWindow contentView 的实测尺寸 —— onContinuousHover 用它把鼠标 location 跟
-    /// IslandHitShape 几何区做命中判断。**绕开 SwiftUI .onHover 在 macOS 26 上不严格按
-    /// contentShape 触发的坑**（鼠标在 view layout frame 整 280×74pt 任意位置都触发 hover）
-    @State private var pillViewSize: CGSize = .zero
 
     /// 当前 AgentMode（驱动左耳精灵），通过 NotificationCenter 跟 ChatViewModel 同步
     @State private var currentMode: AgentMode = {
@@ -631,43 +710,15 @@ struct DynamicIslandPillView: View {
         // hover: hitHeight = notchHeight + hoverDrop（覆盖完整水滴高度）
         //        horizontalInset = (idleExtraWidth - hoverExtraWidth)/2 - 8pt buffer
         //        （横向贴水滴本身宽度 + 每侧 8pt 防抖 buffer，鼠标稍微出水滴边缘不立刻丢 hover）
-        .contentShape(
-            IslandHitShape(
-                hitHeight: isExpanded ? (notchHeight + hoverDrop) : max(0, notchHeight - 4),
-                horizontalInset: isExpanded
-                    ? max(0, (idleExtraWidth - hoverExtraWidth) / 2 - 8)
-                    : idleExtraWidth / 2
-            )
-        )
-        // GeometryReader 在 .background 暴露 view 实测 size 给 onContinuousHover 自检 hit area
-        .background(
-            GeometryReader { geo in
-                Color.clear
-                    .onAppear { pillViewSize = geo.size }
-                    .onChange(of: geo.size) { _, new in pillViewSize = new }
-            }
-        )
-        // ⚠️ 用 .onContinuousHover 而非 .onHover —— SwiftUI macOS 26 上 .onHover 不严格按
-        // contentShape 触发，会用 view layout frame 整 280×74pt NSWindow 判断 → 鼠标在
-        // NotchShape 视觉区下方的透明区也误触发 hover。这里 .active(location) 给的鼠标 location
-        // 是 NSWindow contentView local 坐标，我们自己跟 IslandHitShape 几何区做命中判断
-        .onContinuousHover(coordinateSpace: .local) { phase in
+        // ⚠️ NSWindow.ignoresMouseEvents=true 后 SwiftUI 内部所有 hover/tap gesture 全部收不到事件。
+        // hover 状态完全由 DynamicIslandController 的 NSEvent monitor 在屏幕坐标系自检 hit area
+        // 后通过 NotificationCenter 推过来。这里只是 receive + 用 spring 动画切 isHovering。
+        // click 也是 controller 端 NSEvent .leftMouseDown 直接调 toggleChat，PillView 不参与
+        .onReceive(NotificationCenter.default.publisher(for: .init("HermesPetIslandHoverChanged"))) { note in
             // permission 卡片显示中：灵动岛冻结不响应 hover（permissionActive 已经把 isExpanded
-            // 强制为 true，这里直接 ignore 鼠标进出，避免一离开卡片就 hover false 缩回）
+            // 强制为 true，避免一离开卡片就 hover false 缩回）
             if permissionActive { return }
-            let target: Bool
-            switch phase {
-            case .active(let location):
-                let hitHeight = isExpanded ? (notchHeight + hoverDrop) : max(0, notchHeight - 4)
-                let inset = isExpanded
-                    ? max(0, (idleExtraWidth - hoverExtraWidth) / 2 - 8)
-                    : idleExtraWidth / 2
-                let hitW = max(0, pillViewSize.width - inset * 2)
-                let hitRect = CGRect(x: inset, y: 0, width: hitW, height: hitHeight)
-                target = hitRect.contains(location)
-            case .ended:
-                target = false
-            }
+            let target = (note.userInfo?["hovering"] as? Bool) ?? false
             if isHovering != target {
                 // **水滴动画**：width 80→4 + height 32→64 + radius 14→22 三轴同步驱动。
                 // interpolatingSpring 让水流感更连贯（mass=1.0 给形变惯性 / stiffness 180 比标准

@@ -1,5 +1,6 @@
 import SwiftUI
 import Carbon
+import UniformTypeIdentifiers
 
 /// 设置面板 —— macOS Sonoma 系统设置风格：
 /// - 左侧 156pt 侧栏分类列表
@@ -15,6 +16,7 @@ struct SettingsView: View {
     @State private var hotkeyRefreshID = UUID()
     /// 画布模式开关（实验性功能）—— ChatView 的 + 菜单根据这个 flag 决定是否显示"新建画布"
     @AppStorage("canvasModeEnabled") private var canvasModeEnabled: Bool = false
+    @AppStorage(ChatFontScale.storageKey) private var chatFontScale: Double = ChatFontScale.default
     /// 当前正在"查看 / 编辑配置"的 mode。
     /// **不绑定 viewModel.agentMode** —— 设置里调这个 Picker 不会切换正在进行的对话的 mode，
     /// 仅决定下面 hermesConfig / claudeCard / codexCard 显示哪一个。
@@ -398,6 +400,7 @@ struct SettingsView: View {
         case "deepseek": return "sk-xxxxxx (DeepSeek)"
         case "zhipu":    return "xxxxx.xxxxx (智谱)"
         case "moonshot": return "sk-xxxxxx (Moonshot)"
+        case "minimax":  return "sk-xxxxxx (MiniMax)"
         case "openai":   return "sk-xxxxxx (OpenAI)"
         default: return "your-secret-key"
         }
@@ -820,27 +823,72 @@ struct SettingsView: View {
     // MARK: - 音效
 
     private var soundSection: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            soundRow("启动语音", caption: "按住 ⌘⇧V 触发录音时", binding: $viewModel.voiceStartSound)
+        VStack(alignment: .leading, spacing: 14) {
+            // 顶部提示卡 —— 让用户秒懂"每行可以独立开关 / 换音 / 用自己的音频文件"
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "info.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.system(size: 13))
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("每个事件可独立选音效或关闭")
+                        .font(.system(size: 12, weight: .medium))
+                    Text("默认是 macOS 系统内置音，也可以点「自定义…」选你自己的 mp3 / wav / m4a / aiff。选「🔇 静音」即可关掉某事件。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.orange.opacity(0.08))
+            )
+
+            soundRow(event: .voiceStart,  binding: $viewModel.voiceStartSound)
             Divider()
-            soundRow("任务完成", caption: "AI 回复完成时", binding: $viewModel.voiceFinishSound)
+            soundRow(event: .voiceFinish, binding: $viewModel.voiceFinishSound)
+            Divider()
+            soundRow(event: .dragIn,      binding: $viewModel.dragInSound)
+            Divider()
+            soundRow(event: .send,        binding: $viewModel.sendSound)
+            Divider()
+            soundRow(event: .error,       binding: $viewModel.errorSound)
         }
     }
 
-    private func soundRow(_ title: String, caption: String, binding: Binding<String>) -> some View {
+    private func soundRow(event: SoundEvent, binding: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 13, weight: .medium))
-            HStack(spacing: 6) {
-                Picker("", selection: binding) {
-                    ForEach(Self.systemSounds, id: \.0) { (value, label) in
-                        Text(label).tag(value)
+            Text(event.displayTitle).font(.system(size: 13, weight: .medium))
+
+            HStack(spacing: 8) {
+                // 当前选的是自定义文件 —— 显示文件名 chip + ✕（移回静音）
+                if binding.wrappedValue.hasPrefix("/") {
+                    customFileChip(path: binding.wrappedValue) {
+                        binding.wrappedValue = ""
                     }
+                } else {
+                    // 系统音 Picker（含 "🔇 静音" 在最上）
+                    Picker("", selection: binding) {
+                        ForEach(Self.systemSounds, id: \.0) { (value, label) in
+                            Text(label).tag(value)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 220)
                 }
-                .labelsHidden()
-                .frame(maxWidth: 260)
 
                 Button {
-                    playPreview(binding.wrappedValue)
+                    pickCustomSoundFile(for: binding)
+                } label: {
+                    Label("自定义…", systemImage: "folder.badge.plus")
+                        .font(.system(size: 11))
+                }
+                .controlSize(.small)
+                .help("从本地选择一个音频文件（mp3 / wav / m4a / aiff）")
+
+                Button {
+                    SoundManager.play(rawValue: binding.wrappedValue)
                 } label: {
                     Image(systemName: "play.circle.fill")
                         .font(.system(size: 18))
@@ -852,7 +900,62 @@ struct SettingsView: View {
 
                 Spacer()
             }
-            Text(caption).font(.caption).foregroundStyle(.secondary)
+
+            Text(event.displayCaption).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// 自定义音频文件的 chip —— 显示文件名 + ✕ 移除按钮
+    private func customFileChip(path: String, onRemove: @escaping () -> Void) -> some View {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return HStack(spacing: 6) {
+            Image(systemName: "music.note")
+                .font(.system(size: 11))
+                .foregroundStyle(.orange)
+            Text(name)
+                .font(.system(size: 12))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Button {
+                onRemove()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary.opacity(0.6))
+            }
+            .buttonStyle(.borderless)
+            .help("移除自定义音效（恢复静音，可再选系统音）")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule().fill(Color.orange.opacity(0.12))
+        )
+        .overlay(
+            Capsule().strokeBorder(Color.orange.opacity(0.25), lineWidth: 0.5)
+        )
+        .frame(maxWidth: 220, alignment: .leading)
+    }
+
+    /// 弹出 macOS 文件选择面板让用户选一个音频文件，写入 binding（用绝对路径，约定 `/` 开头 = 自定义文件）
+    @MainActor
+    private func pickCustomSoundFile(for binding: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.title = "选择提示音"
+        panel.prompt = "选择"
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        // NSSound 支持 aiff / wav / mp3 / m4a / caf 等常见格式
+        if let audioType = UTType(filenameExtension: "mp3") {
+            panel.allowedContentTypes = [.audio, audioType]
+        } else {
+            panel.allowedContentTypes = [.audio]
+        }
+
+        if panel.runModal() == .OK, let url = panel.url {
+            // 路径必须以 / 开头 —— SoundManager 用这个判断走系统音还是文件加载
+            binding.wrappedValue = url.path
         }
     }
 
@@ -1029,6 +1132,36 @@ struct SettingsView: View {
 
     private var systemSection: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // —— 聊天字号 ——
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "textformat.size")
+                        .foregroundStyle(.indigo)
+                    Text("聊天字号")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    Text("\(Int(chatFontScale * 100))%")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Picker("聊天字号档位", selection: $chatFontScale) {
+                    ForEach(ChatFontScale.presets, id: \.self) { scale in
+                        Text(scaleLabel(scale)).tag(scale)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Text("仅缩放消息正文、代码块、表格、选项卡片。也可在聊天窗口里用 ⌘+ / ⌘- / ⌘0 直接调。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Divider()
+
             captionToggle(
                 icon: "power.circle.fill",
                 iconColor: .blue,
@@ -1080,6 +1213,18 @@ struct SettingsView: View {
                 caption: "用 Codex 自动批量生成产品图集（电商主图风格）。生成需 5~10 分钟，依赖 codex CLI。功能仍在打磨，不需要可保持关闭。",
                 isOn: $canvasModeEnabled
             )
+        }
+    }
+
+    /// 字号档位 segmented Picker 的显示文字
+    private func scaleLabel(_ scale: Double) -> String {
+        switch scale {
+        case 0.85: return "小"
+        case 1.0:  return "标准"
+        case 1.15: return "大"
+        case 1.30: return "更大"
+        case 1.50: return "巨大"
+        default:   return "\(Int(scale * 100))%"
         }
     }
 
@@ -1441,11 +1586,6 @@ struct SettingsView: View {
         ("Basso",     "Basso · 低沉错误"),
         ("Morse",     "Morse · 电报")
     ]
-
-    private func playPreview(_ name: String) {
-        guard !name.isEmpty else { return }
-        NSSound(named: name)?.play()
-    }
 
     private var modeFooterText: String {
         switch configViewingMode {
