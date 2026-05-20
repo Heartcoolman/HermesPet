@@ -48,15 +48,15 @@ Grab the macOS DMG · double-click to install · pick a provider, paste an API k
 <table>
 <tr>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/sponsor-01.jpg" width="56" height="56" alt="Anonymous supporter"/></a><br/>
+<img src="docs/sponsors/sponsor-01.jpg" width="56" height="56" alt="Anonymous supporter"/><br/>
 <sub><b>Anonymous</b></sub>
 </td>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/sponsor-02.jpg" width="56" height="56" alt="Anonymous supporter"/></a><br/>
+<img src="docs/sponsors/sponsor-02.jpg" width="56" height="56" alt="Anonymous supporter"/><br/>
 <sub><b>Anonymous</b></sub>
 </td>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/next-slot.svg" width="56" height="56" alt="Next?"/></a><br/>
+<img src="docs/sponsors/next-slot.svg" width="56" height="56" alt="Next?"/><br/>
 <sub><i>You next?</i></sub>
 </td>
 </tr>
@@ -392,9 +392,11 @@ HermesPet is currently a one-person open-source project. Every issue / PR / star
 
 ## ☕ Buy me a coffee
 
-If HermesPet has been useful to you, you're welcome to [**buy me a coffee on Afdian · afdian.com/a/basionwang**](https://afdian.com/a/basionwang) (the Chinese equivalent of Buy Me a Coffee).
+HermesPet is an independent side project I build in my spare time. If it's been useful to you, the most meaningful ways to support it:
 
-Sponsorships help cover the hard costs (Apple Developer fee, LLM API testing tokens, servers) and let this independent project keep going. No pressure though — a ⭐ or sharing the project with friends is equally meaningful support.
+- Give it a ⭐ so more people can find it
+- Open an [Issue](https://github.com/basionwang-bot/HermesPet/issues) to share feedback, bugs, or feature requests
+- Share it with friends who might find it useful
 
 > 💡 Want to use HermesPet inside your company, or customize it as your branded macOS AI tool? Email me: [basionwang@gmail.com](mailto:basionwang@gmail.com)
 

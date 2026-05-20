@@ -262,15 +262,23 @@ final class OpenCodeServerManager: @unchecked Sendable {
         let portBox = OneShotBox<Int>()
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            guard !data.isEmpty,
-                  let line = String(data: data, encoding: .utf8) else { return }
+            // EOF 防护：opencode serve 启动后会关闭继承的 stdout 写端，读端此后永久处于
+            // "可读(EOF)"状态。若不在此置 nil，dispatch source 会无限高频回调，每次
+            // availableData 触发 fstat+read → 单核满载空转（曾导致整机 ~200% CPU）。
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let line = String(data: data, encoding: .utf8) else { return }
             if let port = Self.parsePort(from: line) {
                 portBox.fulfill(.success(port))
             }
         }
-        // stderr 持续 drain，避免缓冲区写满阻塞子进程
+        // stderr 持续 drain，避免缓冲区写满阻塞子进程；同样要做 EOF 防护
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+            if handle.availableData.isEmpty {
+                handle.readabilityHandler = nil
+            }
         }
 
         try proc.run()

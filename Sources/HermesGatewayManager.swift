@@ -222,12 +222,20 @@ final class HermesGatewayManager: @unchecked Sendable {
 
         // 持续 drain 避免缓冲区满，stderr 抓 last line 作为错误兜底
         stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
-            _ = handle.availableData
+            // EOF 防护：gateway run 启动后会关闭继承的 stdout 写端，读端此后永久处于
+            // "可读(EOF)"状态。不置 nil 的话 dispatch source 会无限高频回调 → 单核满载空转
+            // （与 OpenCodeServerManager 同一个坑，曾导致整机 ~200% CPU）
+            if handle.availableData.isEmpty {
+                handle.readabilityHandler = nil
+            }
         }
         stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty,
-                  let text = String(data: data, encoding: .utf8) else { return }
+            if data.isEmpty {   // EOF：同样要置 nil，否则永久空转
+                handle.readabilityHandler = nil
+                return
+            }
+            guard let text = String(data: data, encoding: .utf8) else { return }
             // 抓最后非空一行存到 _lastError（仅当 process 还没 ready，避免覆盖正常运行日志）
             let lines = text.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
             if let lastErr = lines.last(where: { !$0.isEmpty }) {

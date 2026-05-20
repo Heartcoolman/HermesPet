@@ -193,41 +193,179 @@ final class UpdateChecker {
             }
             try FileManager.default.moveItem(at: tempURL, to: destination)
 
-            // 挂载 DMG，挂载完成后 open 让 Finder 显示
-            attach(dmgPath: destination.path)
+            // 下载完成 → 全自动安装：挂载 → 替换 /Applications 旧版 → 卸载清理 → 重启新版
+            await installFromDMG(dmgPath: destination.path)
         } catch {
             lastError = "下载失败：\(error.localizedDescription)"
         }
     }
 
-    private func attach(dmgPath: String) {
-        let proc = Process()
-        proc.launchPath = "/usr/bin/hdiutil"
-        proc.arguments = ["attach", dmgPath, "-nobrowse", "-noverify", "-noautoopen"]
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.terminationHandler = { p in
-            DispatchQueue.main.async {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                // hdiutil attach 输出格式示例：
-                //   /dev/disk6s1	Apple_HFS	/Volumes/Hermes 桌宠
-                // 我们 grep `/Volumes/` 行第三列拿挂载路径
-                if let line = output.split(separator: "\n").first(where: { $0.contains("/Volumes/") }) {
-                    let parts = line.split(whereSeparator: \.isWhitespace)
-                    if let volPath = parts.last(where: { $0.hasPrefix("/Volumes/") }) {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: String(volPath)))
-                        // 给用户一个引导通知，告诉他下一步该干啥
-                        UpdateChecker.shared.postInstallHint(volumePath: String(volPath))
-                        return
-                    }
-                }
-                if p.terminationStatus != 0 {
-                    UpdateChecker.shared.lastError = "DMG 挂载失败（hdiutil 返回 \(p.terminationStatus)）"
+    /// 全自动安装：挂载 DMG → 找到 .app → 写 helper 脚本 → 弹「立即重启」→ 退出让脚本接管替换+重启。
+    /// 任一步不满足（挂载失败 / 找不到 .app / 目标目录不可写 / 脚本写入失败）→ 回退到打开 Finder 手动拖拽。
+    private func installFromDMG(dmgPath: String) async {
+        guard let volumePath = await Self.attachDMG(dmgPath: dmgPath) else {
+            lastError = "DMG 挂载失败，无法自动安装"
+            return
+        }
+        // 挂载卷里找 .app（优先与当前运行 app 同名）
+        guard let newAppPath = findAppInVolume(volumePath) else {
+            fallbackToManual(volumePath: volumePath)
+            return
+        }
+        let oldAppPath = Bundle.main.bundlePath
+        let parentDir = (oldAppPath as NSString).deletingLastPathComponent
+        // 目标目录不可写（app 在只读位置 / 无权限）→ 回退手动拖拽
+        guard FileManager.default.isWritableFile(atPath: parentDir) else {
+            fallbackToManual(volumePath: volumePath)
+            return
+        }
+        guard let scriptPath = writeInstallScript(
+            oldApp: oldAppPath, newApp: newAppPath, volume: volumePath, dmg: dmgPath
+        ) else {
+            fallbackToManual(volumePath: volumePath)
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "新版 v\(latestVersion ?? "") 已就绪"
+        alert.informativeText = """
+        点击「立即重启」自动完成安装。
+
+        应用会先退出几秒，自动替换为新版后重新打开——你不用打开访达，也不用手动拖拽。
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "立即重启")
+        alert.addButton(withTitle: "稍后")
+        if alert.runModal() == .alertFirstButtonReturn {
+            launchInstaller(scriptPath: scriptPath)
+            NSApp.terminate(nil)
+        } else {
+            // 用户选稍后：卸载挂载卷（DMG 与脚本留着，下次更新会覆盖）
+            Self.detach(volumePath: volumePath)
+        }
+    }
+
+    /// 回退路径：自动安装条件不满足时，打开 Finder 让用户手动拖拽（保留旧体验兜底）
+    private func fallbackToManual(volumePath: String) {
+        NSWorkspace.shared.open(URL(fileURLWithPath: volumePath))
+        postInstallHint(volumePath: volumePath)
+    }
+
+    /// 后台 `hdiutil attach` 挂载 DMG，解析出 `/Volumes/...` 挂载路径。失败返回 nil。
+    /// 挂载路径在每行末尾、tab 分隔，可能含空格（"Hermes 桌宠"），所以取 "/Volumes/" 起到行尾，
+    /// 不能按空白切分（会把含空格的卷名截断）。
+    private static func attachDMG(dmgPath: String) async -> String? {
+        await Task.detached {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+            proc.arguments = ["attach", dmgPath, "-nobrowse", "-noverify", "-noautoopen"]
+            let pipe = Pipe()
+            proc.standardOutput = pipe
+            proc.standardError = Pipe()
+            do { try proc.run() } catch { return nil }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
+            guard proc.terminationStatus == 0 else { return nil }
+            let output = String(data: data, encoding: .utf8) ?? ""
+            for line in output.split(separator: "\n") {
+                if let range = line.range(of: "/Volumes/") {
+                    return String(line[range.lowerBound...]).trimmingCharacters(in: .whitespaces)
                 }
             }
-        }
+            return nil
+        }.value
+    }
+
+    /// `hdiutil detach` 卸载挂载卷（用户选"稍后"时清理）
+    private static func detach(volumePath: String) {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        proc.arguments = ["detach", volumePath, "-quiet", "-force"]
         try? proc.run()
+    }
+
+    /// 挂载卷里找要安装的 .app：优先与当前运行 app 同名，否则第一个 .app
+    private func findAppInVolume(_ volumePath: String) -> String? {
+        let fm = FileManager.default
+        guard let items = try? fm.contentsOfDirectory(atPath: volumePath) else { return nil }
+        let currentName = (Bundle.main.bundlePath as NSString).lastPathComponent
+        if items.contains(currentName) {
+            return (volumePath as NSString).appendingPathComponent(currentName)
+        }
+        if let appName = items.first(where: { $0.hasSuffix(".app") }) {
+            return (volumePath as NSString).appendingPathComponent(appName)
+        }
+        return nil
+    }
+
+    /// 写一个「app 退出后接管」的安装脚本：等父进程退出 → ditto 替换 → 清 quarantine →
+    /// 卸载 DMG + 删 DMG → 重开新版 → 自删。返回脚本路径；写入失败返回 nil。
+    /// 注：路径用单引号包，app/DMG/卷路径均不含单引号，安全。
+    private func writeInstallScript(oldApp: String, newApp: String, volume: String, dmg: String) -> String? {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = """
+        #!/bin/bash
+        OLD_APP='\(oldApp)'
+        NEW_APP='\(newApp)'
+        VOLUME='\(volume)'
+        DMG='\(dmg)'
+        PARENT_PID=\(pid)
+
+        # 等父 app 退出（最多 ~12s）
+        for i in $(seq 1 60); do
+          kill -0 "$PARENT_PID" 2>/dev/null || break
+          sleep 0.2
+        done
+        sleep 0.5
+
+        # 安全替换：先 ditto 到同目录暂存（同卷 → mv 是原子 rename），成功后才删旧 + 改名。
+        # ditto 中途失败时旧版原样保留，绝不出现"旧的删了新的没装上 → app 消失"。
+        STAGING="${OLD_APP}.new"
+        rm -rf "$STAGING"
+        if /usr/bin/ditto "$NEW_APP" "$STAGING"; then
+          rm -rf "$OLD_APP"
+          mv "$STAGING" "$OLD_APP"
+          /usr/bin/xattr -cr "$OLD_APP" 2>/dev/null || true
+        else
+          rm -rf "$STAGING"   # 替换失败，旧版不动，下面重开旧版兜底
+        fi
+
+        # 卸载 DMG + 删下载文件
+        /usr/bin/hdiutil detach "$VOLUME" -quiet -force 2>/dev/null || true
+        rm -f "$DMG"
+
+        # 重新打开（替换成功 = 新版；失败则旧版兜底，用户至少不会丢 app）
+        /usr/bin/open "$OLD_APP"
+
+        # 自删脚本
+        rm -f "$0"
+        """
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let hpDir = dir.appendingPathComponent("HermesPet", isDirectory: true)
+        try? FileManager.default.createDirectory(at: hpDir, withIntermediateDirectories: true)
+        let scriptURL = hpDir.appendingPathComponent("update-installer.sh")
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+            return scriptURL.path
+        } catch {
+            return nil
+        }
+    }
+
+    /// 启动安装脚本并脱离本进程（nohup + 后台），这样本 app 退出后脚本仍继续跑。
+    /// **刻意不注册到 SubprocessRegistry** —— 否则 NSApp.terminate 会把它一起 SIGTERM 掉。
+    private func launchInstaller(scriptPath: String) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = ["-c", "nohup /bin/bash \"\(scriptPath)\" >/tmp/hermespet-update.log 2>&1 &"]
+        do {
+            try task.run()
+            task.waitUntilExit()   // 外层 bash 后台化 nohup 子进程后立即退出
+        } catch {
+            lastError = "无法启动安装程序：\(error.localizedDescription)"
+        }
     }
 
     /// 弹一个 NSAlert 引导用户拖到 Applications

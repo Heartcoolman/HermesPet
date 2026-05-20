@@ -1,5 +1,18 @@
 import SwiftUI
 
+/// 桌面漫步 sprite 的渲染帧率（秒/帧）。默认 1/30；桌宠"累了趴下休息"时
+/// `ClawdWalkView` 把它调到 1/12 让内部 TimelineView 降帧省电（呼吸/眨眼仍流畅）。
+/// 灵动岛 mini sprite 等其他用处不设置此值，沿用默认 30fps。
+private struct SpriteFrameIntervalKey: EnvironmentKey {
+    static let defaultValue: Double = 1.0 / 30.0
+}
+extension EnvironmentValues {
+    var spriteFrameInterval: Double {
+        get { self[SpriteFrameIntervalKey.self] }
+        set { self[SpriteFrameIntervalKey.self] = newValue }
+    }
+}
+
 /// 灵动岛左耳的 mode 精灵 —— 显示当前 AgentMode 的标志元素，
 /// 并在"工作中"（流式生成时）播放各自专属的动画。
 ///
@@ -109,6 +122,8 @@ struct ClawdView: View {
     /// `false` 时画**一张静态帧**（now=0 → 呼吸/眨眼/走路相位都归零、不读鼠标位置）。
     /// 用户在设置里关「桌宠动效」、或 mini sprite 未 hover 时传 false 以省 CPU。
     var animated: Bool = true
+    /// 休息态降帧（见 ClawdWalkView / SpriteFrameIntervalKey）
+    @Environment(\.spriteFrameInterval) private var spriteFrameInterval
 
     private static let viewBoxW: CGFloat = 15
     private static let viewBoxH: CGFloat = 10
@@ -135,11 +150,14 @@ struct ClawdView: View {
     var body: some View {
         Group {
             if animated {
-                TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+                TimelineView(.animation(minimumInterval: spriteFrameInterval)) { timeline in
                     Canvas(rendersAsynchronously: false) { ctx, size in
                         draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+                // 帧率档变化时强制重建 TimelineView —— .animation schedule 不会因
+                // minimumInterval 运行时变化自动重新调度，靠切换 .id 让新帧率真正生效
+                .id(spriteFrameInterval > 1.0/20.0)
             } else {
                 // 静态帧：now=0 让所有动画相位归零；followMouse 在 draw 里被 `animated` AND 掉
                 Canvas(rendersAsynchronously: false) { ctx, size in
@@ -981,6 +999,8 @@ struct HorseView: View {
     var palette: PetPalette = .horseDefault
     /// 是否启用 TimelineView 30fps 重绘。false 时画静态帧（now=0 相位归零）
     var animated: Bool = true
+    /// 休息态降帧（见 ClawdWalkView / SpriteFrameIntervalKey）
+    @Environment(\.spriteFrameInterval) private var spriteFrameInterval
 
     // 默认色（palette 不变时跟原版完全一致）—— 鬃毛 / 翅膀 / 蹄子 不参与调色保留视觉特征
     private static let maneColor       = Color(red: 217.0/255, green: 178.0/255, blue: 102.0/255)  // #D9B266 深 amber 金
@@ -996,11 +1016,14 @@ struct HorseView: View {
     var body: some View {
         Group {
             if animated {
-                TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+                TimelineView(.animation(minimumInterval: spriteFrameInterval)) { timeline in
                     Canvas(rendersAsynchronously: false) { ctx, size in
                         draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+                // 帧率档变化时强制重建 TimelineView —— .animation schedule 不会因
+                // minimumInterval 运行时变化自动重新调度，靠切换 .id 让新帧率真正生效
+                .id(spriteFrameInterval > 1.0/20.0)
             } else {
                 Canvas(rendersAsynchronously: false) { ctx, size in
                     draw(ctx: ctx, size: size, now: 0)
@@ -1419,6 +1442,8 @@ struct TerminalView: View {
     var palette: PetPalette = .terminalDefault
     /// 是否启用 TimelineView 30fps 重绘。false 时画静态帧（now=0 相位归零、不读鼠标）
     var animated: Bool = true
+    /// 休息态降帧（见 ClawdWalkView / SpriteFrameIntervalKey）
+    @Environment(\.spriteFrameInterval) private var spriteFrameInterval
 
     // 不参与调色的默认色（保留 Codex 视觉特征）
     private static let screenColor     = Color(red: 10.0/255,  green: 15.0/255,  blue: 31.0/255)   // #0A0F1F 头部黑屏
@@ -1437,11 +1462,14 @@ struct TerminalView: View {
     var body: some View {
         Group {
             if animated {
-                TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+                TimelineView(.animation(minimumInterval: spriteFrameInterval)) { timeline in
                     Canvas(rendersAsynchronously: false) { ctx, size in
                         draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+                // 帧率档变化时强制重建 TimelineView —— .animation schedule 不会因
+                // minimumInterval 运行时变化自动重新调度，靠切换 .id 让新帧率真正生效
+                .id(spriteFrameInterval > 1.0/20.0)
             } else {
                 Canvas(rendersAsynchronously: false) { ctx, size in
                     draw(ctx: ctx, size: size, now: 0)
@@ -1835,6 +1863,8 @@ struct CloudPetView: View {
     var palette: PetPalette = .cloudDefault
     /// 是否启用 TimelineView 30fps 重绘。false 时画静态帧（now=0 相位归零）
     var animated: Bool = true
+    /// 休息态降帧（见 ClawdWalkView / SpriteFrameIntervalKey）
+    @Environment(\.spriteFrameInterval) private var spriteFrameInterval
 
     private static let viewBoxW: CGFloat = 14
     private static let viewBoxH: CGFloat = 10
@@ -1844,11 +1874,14 @@ struct CloudPetView: View {
     var body: some View {
         Group {
             if animated {
-                TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+                TimelineView(.animation(minimumInterval: spriteFrameInterval)) { timeline in
                     Canvas(rendersAsynchronously: false) { ctx, size in
                         draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+                // 帧率档变化时强制重建 TimelineView —— .animation schedule 不会因
+                // minimumInterval 运行时变化自动重新调度，靠切换 .id 让新帧率真正生效
+                .id(spriteFrameInterval > 1.0/20.0)
             } else {
                 Canvas(rendersAsynchronously: false) { ctx, size in
                     draw(ctx: ctx, size: size, now: 0)

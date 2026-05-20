@@ -20,6 +20,8 @@ struct FomoView: View {
     var palette: PetPalette = .fomoDefault
     /// 是否启用 TimelineView 30fps 重绘
     var animated: Bool = true
+    /// 休息态降帧（见 ClawdWalkView / SpriteFrameIntervalKey）
+    @Environment(\.spriteFrameInterval) private var spriteFrameInterval
 
     private static let viewBoxW: CGFloat = 14
     private static let viewBoxH: CGFloat = 10
@@ -51,11 +53,13 @@ struct FomoView: View {
     var body: some View {
         Group {
             if animated {
-                TimelineView(.animation(minimumInterval: 1.0/30.0)) { timeline in
+                TimelineView(.animation(minimumInterval: spriteFrameInterval)) { timeline in
                     Canvas(rendersAsynchronously: false) { ctx, size in
                         draw(ctx: ctx, size: size, now: timeline.date.timeIntervalSinceReferenceDate)
                     }
                 }
+                // 帧率档变化时强制重建 TimelineView（见 ModeSprite 同款注释）
+                .id(spriteFrameInterval > 1.0/20.0)
             } else {
                 Canvas(rendersAsynchronously: false) { ctx, size in
                     draw(ctx: ctx, size: size, now: 0)

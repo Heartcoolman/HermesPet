@@ -60,6 +60,12 @@ final class ClawdWalkController {
     private static let patrolSpeed: CGFloat = 60         // 巡视时下到桌面 / 回菜单栏速度
     private static let edgeMargin: CGFloat = 18          // 屏幕左右 18pt 内反弹
     private static let tickInterval: TimeInterval = 1.0/30.0
+    /// 休息态 walkTimer 降频（6fps 够检测"该醒了吗" + 鼠标贴近惊醒）
+    private static let tickIntervalRest: TimeInterval = 1.0/6.0
+    /// 自由漫步累积活跃多久就"累了"想休息（随机区间，避免节奏机械）
+    private static let restAfterActiveRange: ClosedRange<TimeInterval> = 30...55   // 走这么久才"累"想歇，大部分时间在动
+    /// 一次休息时长（随机区间）
+    private static let restDurationRange: ClosedRange<TimeInterval> = 10...18   // 只歇一小会儿就起来继续逛
     private static let pauseEveryMin: TimeInterval = 4.0
     private static let pauseEveryMax: TimeInterval = 8.0
     private static let pauseDurMin: TimeInterval = 1.4
@@ -91,6 +97,15 @@ final class ClawdWalkController {
     private var walkY: CGFloat = 0
     private var nextPauseAt: Date?
     private var pauseEndsAt: Date?
+
+    // 疲劳/休息状态机（TODO Step 7 省电）
+    /// 自由漫步累积活跃时长，达到 restThreshold → 进入休息
+    private var walkAccum: TimeInterval = 0
+    /// 当前这轮疲劳阈值（每次醒来重新随机）
+    private var restThreshold: TimeInterval = .random(in: 18...32)
+    /// != nil 表示正在休息，值为休息结束时间
+    private var restingUntil: Date?
+
     private var lastBackgroundStreamingCount: Int = 0
     private var lastMode: AgentMode = .hermes
     private var isHovering = false
@@ -462,6 +477,10 @@ final class ClawdWalkController {
 
         isShown = true
         state.spriteAnimated = true   // 桌宠显示 → sprite 内部 TimelineView 启动
+        state.lowPower = false
+        restingUntil = nil
+        walkAccum = 0
+        restThreshold = Double.random(in: Self.restAfterActiveRange)
         startWalkTimer()
     }
 
@@ -472,6 +491,9 @@ final class ClawdWalkController {
         lastTickAt = nil
         pauseEndsAt = nil
         state.isChasing = false
+        // 退场清理休息态（下次 show 重新计时）
+        restingUntil = nil
+        state.lowPower = false
         // 气泡立即收起 + 窗口跟着 Clawd 一起退
         state.bubbleVisible = false
         state.bubbleText = ""
@@ -750,11 +772,39 @@ final class ClawdWalkController {
 
     // MARK: - 漫步主循环
 
-    private func startWalkTimer() {
+    private func startWalkTimer(interval: TimeInterval = ClawdWalkController.tickInterval) {
         walkTimer?.invalidate()
         lastTickAt = Date()
-        walkTimer = Timer.scheduledTimer(withTimeInterval: Self.tickInterval, repeats: true) { [weak self] _ in
+        walkTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
+        }
+    }
+
+    /// 进入休息态：冒一句"累了"，趴下不动，sprite 降到 12fps + walkTimer 降到 6fps 省电。
+    private func enterRest(now: Date) {
+        restingUntil = now.addingTimeInterval(Double.random(in: Self.restDurationRange))
+        walkAccum = 0
+        state.isWalking = false
+        state.isChasing = false
+        state.pose = .rest
+        state.lowPower = true
+        pauseEndsAt = nil
+        nextPauseAt = nil
+        showBubble(text: pickQuote(from: ClawdQuotes.tired), duration: 2.6)
+        startWalkTimer(interval: Self.tickIntervalRest)
+    }
+
+    /// 退出休息态：恢复 30fps + 正常漫步节奏。`announce` 时冒一句"睡饱啦"。
+    private func wakeUp(now: Date, announce: Bool) {
+        restingUntil = nil
+        walkAccum = 0
+        restThreshold = Double.random(in: Self.restAfterActiveRange)
+        state.lowPower = false
+        state.pose = .rest
+        nextPauseAt = now.addingTimeInterval(Double.random(in: Self.pauseEveryMin...Self.pauseEveryMax))
+        startWalkTimer(interval: Self.tickInterval)
+        if announce {
+            showBubble(text: pickQuote(from: ClawdQuotes.refreshed), duration: 2.0)
         }
     }
 
@@ -793,7 +843,7 @@ final class ClawdWalkController {
             return
         }
         // patrol 未启动 + 到点 + 条件满足 → 开新一次（异步抓桌面图标）
-        if let next = nextPatrolAt, now >= next, isHovering == false, pauseEndsAt == nil {
+        if let next = nextPatrolAt, now >= next, isHovering == false, pauseEndsAt == nil, restingUntil == nil {
             nextPatrolAt = nil   // 防止并发触发
             startPatrol(screen: screen)
             // 不 return —— 让本 tick 继续走常规逻辑直到 patrol 真正切到 goingTo（异步几百 ms 后）
@@ -806,6 +856,18 @@ final class ClawdWalkController {
         let dx = mouseLoc.x - clawdCx
         let dy = mouseLoc.y - clawdCy
         let dist = sqrt(dx * dx + dy * dy)
+
+        // —— 1.5) 休息态：趴着省电；睡够 / 被 hover / 被拖动 / 鼠标贴近 → 醒来 ——
+        if restingUntil != nil {
+            let disturbed = isHovering || state.isBeingDragged || state.isEating || dist < Self.chaseEnterDist
+            if let until = restingUntil, now < until, !disturbed {
+                state.isWalking = false
+                syncBubbleWindow()
+                return
+            }
+            // 到点自然醒报一句；被打扰惊醒则安静起身（不打断用户操作）
+            wakeUp(now: now, announce: !disturbed)
+        }
 
         if !isHovering, pauseEndsAt == nil {
             if !state.isChasing && dist < Self.chaseEnterDist {
@@ -966,6 +1028,12 @@ final class ClawdWalkController {
         // —— 5) 正常漫步 ——
         state.pose = .rest
         state.isWalking = true
+        // 疲劳累积：自由漫步够久就"累了"，趴下休息省电（Step 7）
+        walkAccum += dt
+        if walkAccum >= restThreshold {
+            enterRest(now: now)
+            return
+        }
         let delta = Self.walkSpeed * direction * CGFloat(dt)
         positionX += delta
 
@@ -1576,6 +1644,8 @@ final class ClawdWalkController {
         state.bubbleVisible = false
         state.bubbleText = ""
         state.spriteAnimated = false   // 隐藏 = 关 sprite 内部 TimelineView
+        state.lowPower = false
+        restingUntil = nil
         nextBubbleAt = nil
         bubbleHideAt = nil
         patrol = nil
@@ -1639,6 +1709,10 @@ final class ClawdWalkState {
     /// 会一直跑空转（v1.2.9 CPU 高负载主因之一：sample 抓到隐藏 NSWindow 的 sprite 还在 draw）。
     /// Controller 在 show 时置 true，stopAndHide 完成 orderOut 后置 false。
     var spriteAnimated: Bool = false
+
+    /// 低功耗休息态 —— 桌宠"跑累了趴下休息"时置 true，sprite 渲染降到 12fps（呼吸/眨眼仍流畅）省 CPU。
+    /// 由 ClawdWalkController 的疲劳状态机驱动（TODO Step 7 节能）。
+    var lowPower: Bool = false
 
     /// Wave A1 实时存在感：每次 UserIntentRecorder 落库一条意图就 +1，
     /// ClawdWalkView 监听数值变化触发"瞥一眼"动画（rotation 摆头 + 白色 flash）。
@@ -1711,6 +1785,10 @@ fileprivate enum ClawdQuotes {
     static let greetings = ["嗨~", "找我吗?", "诶?", "👋", "回来啦?", "在这呢"]
     /// 撞到屏幕边缘
     static let bumps = ["哎呀", "...", "走错了", "啊"]
+    /// 跑累了进入休息态时冒
+    static let tired = ["好累呀…歇会儿 😮‍💨", "不跑啦，趴一会儿", "腿酸了…", "休息一下下~", "喘口气 🫠"]
+    /// 休息够了起身时冒
+    static let refreshed = ["睡饱啦！", "满血复活 ✨", "再逛逛~", "精神了！", "走起 🐾"]
 
     /// 按当前时段返回台词池（早上加 morning，深夜加 lateNight，其余只用 idle）
     static func contextualBucket() -> [String] {
@@ -1775,8 +1853,12 @@ struct ClawdWalkView: View {
             Group {
                 let palette = currentPalette
                 // 桌宠隐藏时（orderOut 后 spriteAnimated=false），sprite 切静态帧，
-                // sprite 内部 TimelineView 不再 60fps 空转
-                let anim = state.spriteAnimated
+                // sprite 内部 TimelineView 不再空转。
+                // 休息态（lowPower）同样彻底停 TimelineView —— 关键：.animation schedule 会持续
+                // 驱动屏幕刷新周期（即便降帧也不停 step），连带每个周期触发所有窗口（含不可见的
+                // 聊天窗 fullSizeContentView）重算 drag margins + 遍历焦点树，烧满 CPU。只有完全
+                // 去掉 TimelineView（画静态帧）才能让 display cycle 真正停下来。桌宠"睡着"本就静止。
+                let anim = state.spriteAnimated && !state.lowPower
                 switch state.visual {
                 case .clawd:
                     // 把 state.isWalking 传给 ClawdView，让它内部播放官方走路动画
@@ -1803,6 +1885,8 @@ struct ClawdWalkView: View {
                                  palette: palette, animated: anim)
                 }
             }
+            // 休息态把 sprite 帧率从 30fps 降到 12fps（呼吸/眨眼仍流畅）省 CPU；走动/被逗时恢复 30fps
+            .environment(\.spriteFrameInterval, state.lowPower ? 1.0/12.0 : 1.0/30.0)
             // 朝向 + 吃东西时的整体缩放（鼓胀 / 缩小消失）合到一个 scaleEffect
             // 被拖动时整体放大 1.08，给"我被拎起来啦"的视觉反馈
             .scaleEffect(x: (state.facingRight ? 1 : -1) * state.eatScale * (state.isBeingDragged ? 1.08 : 1),

@@ -47,15 +47,15 @@
 <table>
 <tr>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/sponsor-01.jpg" width="56" height="56" alt="匿名朋友"/></a><br/>
+<img src="docs/sponsors/sponsor-01.jpg" width="56" height="56" alt="匿名朋友"/><br/>
 <sub><b>匿名</b></sub>
 </td>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/sponsor-02.jpg" width="56" height="56" alt="匿名朋友"/></a><br/>
+<img src="docs/sponsors/sponsor-02.jpg" width="56" height="56" alt="匿名朋友"/><br/>
 <sub><b>匿名</b></sub>
 </td>
 <td align="center" width="110">
-<a href="https://afdian.com/a/basionwang"><img src="docs/sponsors/next-slot.svg" width="56" height="56" alt="下一位"/></a><br/>
+<img src="docs/sponsors/next-slot.svg" width="56" height="56" alt="下一位"/><br/>
 <sub><i>下一位？</i></sub>
 </td>
 </tr>
@@ -391,9 +391,11 @@ HermesPet 还是个一个人维护的开源项目，每一个 issue / PR / star 
 
 ## ☕ 请我喝杯咖啡
 
-如果 HermesPet 帮到你，欢迎在 [**爱发电 · afdian.com/a/basionwang**](https://afdian.com/a/basionwang) 上请我喝杯咖啡。
+HermesPet 是我业余时间独立开发的项目。如果它帮到你，最有意义的支持方式：
 
-赞助会帮我覆盖一部分硬性开销（Apple Developer 年费 / 各家 LLM API 测试 token / 服务器），让这个独立项目走得更稳一点。不赞助也完全没关系，点个 ⭐ 或者把它推荐给朋友同样是真心实意的支持。
+- 点个 ⭐ Star 让更多人能看到
+- 在 [Issue](https://github.com/basionwang-bot/HermesPet/issues) 里反馈使用体验、Bug、想加的功能
+- 把它分享给身边可能用得上的朋友
 
 > 💡 想把 HermesPet 用在公司内部、定制成你们品牌的 macOS AI 工具？欢迎邮件聊：[basionwang@gmail.com](mailto:basionwang@gmail.com)
 

@@ -244,16 +244,21 @@ final class CodexClient: @unchecked Sendable {
             let stderrBuffer = CodexLockedData()
             errPipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
-                if !data.isEmpty {
-                    stderrBuffer.append(data)
+                if data.isEmpty {   // EOF：置 nil，避免进程退出后 handler 空转
+                    handle.readabilityHandler = nil
+                    return
                 }
+                stderrBuffer.append(data)
             }
 
             let state = StreamState()
 
             outPipe.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
-                if data.isEmpty { return }
+                if data.isEmpty {   // EOF：置 nil 防空转
+                    handle.readabilityHandler = nil
+                    return
+                }
                 state.buffer.append(data)
 
                 while let nlRange = state.buffer.range(of: Data([0x0a])) {

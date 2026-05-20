@@ -1,5 +1,33 @@
 # HermesPet 优化路线图
 
+## [P0-进行中] 聊天窗后台空转烧 CPU（2026-05-20 排查中）
+
+> **现象**：opencode EOF 那个 207% 修好后，桌宠在休息、且聊天窗根本没打开时，整机 CPU 仍稳定在 ~37%。用户直觉"不是桌宠绘制问题"——查实确实如此。
+>
+> **根因（sample 链路坐实）**：
+> - `ChatWindowController`（ChatWindowController.swift:39）是全项目唯一 `.titled + .fullSizeContentView` 窗口，且 `isMovableByWindowBackground = true`、`HermesPetApp.swift:124` 启动即创建。
+> - 主线程每个屏幕刷新周期：`CA::Transaction::commit` → `NSDisplayCycleFlush` → 该窗口 `_resetDragMarginsIfNeeded` → `_regionForOpaqueViewsBlockingDraggableFrame` → `NSThemeFrame._opaqueRectForWindowMoveWhenInTitlebar` → `NSHostingView.acceptsFirstResponder.getter` → `FocusBridge` → `FocusNavigator.firstNavigableItem` → `MultiViewResponder.visit()` **深递归遍历整棵 SwiftUI 焦点树** + 海量 `swift_conformsToProtocol`（走 dyld）。视图树越大越贵。
+> - **即使聊天窗不可见也参与**（最坑的点，待确认它为何在 not-visible 时仍进 display cycle observer）。
+> - display cycle 谁在驱动：桌宠 sprite 的 `TimelineView(.animation)` schedule 绑定屏幕刷新，**即便降帧（minimumInterval）也只少重绘、不停 step**，所以每个屏幕周期都 commit → flush → 连带聊天窗空转。
+>
+> **关键实验**：桌宠休息态把 sprite 改 `animated=false`（彻底停 TimelineView 画静态帧）后，CPU 37%→**18-21%**，display cycle/焦点遍历命中 78→**10**。证明 sprite TimelineView 是 display cycle 驱动源、聊天窗搭便车。
+
+### 已落地
+- [x] **opencode server stdout/stderr EOF 空转 hotfix** —— 砍掉 207% 的大头（详见下方 opencode 模块）。
+- [x] **桌宠疲劳/休息状态机（Step 7）** —— 走 30~55s 累→冒"好累呀"趴下休息 10~18s→鼠标靠近/hover/拖动惊醒。休息态 `animated=false` 彻底停 TimelineView。`ClawdWalkState.lowPower` + `SpriteFrameIntervalKey`（降帧 Environment 暂留作基础设施，休息直接静止）。
+
+### 待办（下次从这里继续，按依赖顺序）
+- [ ] **Step A：确认聊天窗为何"不可见仍参与 display cycle"** —— 查 `ChatWindowController` 创建后 `window.isVisible` 实际值；是 init 即 visible、被 show 过未正确 orderOut、还是 `collectionBehavior=.canJoinAllSpaces` 等导致。
+- [ ] **Step B：根治方案（确认 A 后定）**
+  - 候选 1：聊天窗不显示时确保彻底 `orderOut` / 不进 display cycle observer（若 A 发现是 visible 遗留，最干净）。
+  - 候选 2：收敛聊天窗可聚焦元素 / 限制 responder 树规模，降低每帧 `firstNavigableItem` 遍历成本。
+  - 候选 3：评估去掉 `.fullSizeContentView` 或 `isMovableByWindowBackground`（动到"内容延伸标题栏 + 背景可拖拽"的视觉/交互，需权衡）。
+  - 候选 4：桌宠 sprite 改用不绑屏幕刷新的低频驱动替代 `TimelineView(.animation)`，从源头降 display cycle 频率（治标，影响手感）。
+- [ ] **Step C：验证** —— 桌宠正常活泼走动（非休息）时整机 CPU 目标 <15%；sample 确认 `NSDisplayCycleFlush`/`FocusNavigator` 不再是热点。
+
+### 临时改动备忘（已恢复，勿再动）
+- 排查期间曾把 `restAfterActiveRange` 改 2...3、`restDurationRange` 改 180...240、休息态惊醒去掉 `dist` 条件——**均已改回正式值**（30...55 / 10...18 / 含 dist 惊醒）。
+
 ## [P0] 界面体验 ✅
 - [x] Markdown 渲染：标题、粗体、斜体、行内代码、链接
 - [x] **Markdown GFM 表格渲染** —— `MarkdownRenderer` 加 `Block.table` + `TableBlockView`（SwiftUI Grid 列宽自动对齐）。解析支持 `:--/--/-:/:-:` 列对齐符；表头加底色+加粗+底部 hairline、隔行底色、行间细线、单元格内复用 InlineMarkdownView（bold/italic/code/link 全部生效）、长内容自动换行不横滚。流式期间至少 header+separator 两行齐了才进入表格识别，避免半截被错位渲染。空 cell 用 `Text(" ")` 占位防列塌缩
@@ -245,7 +273,7 @@
 - [x] **agentMode 同步** —— ChatViewModel.agentMode.didSet 多发一条 `HermesPetModeChanged` 通知给灵动岛
 - [x] **Step 5** `ClaudeCodeClient` 透出 tool_use 事件，串到灵动岛（HermesPetToolStarted/Ended 通知）
 - [x] **Step 6** 后台对话发光：ConversationPill `isBackgroundStreaming` overlay + 灵动岛右耳 `BackgroundStreamingBadge`
-- [ ] **Step 7** 节流 + 性能：所有动画检查能否在 idle 时停掉（节能）
+- [x] **Step 7** 节流 + 性能（2026-05-20）：桌宠"跑累了趴下休息"低功耗状态机 —— 自由漫步累积 18~32s 后冒泡"好累呀…"进入休息态，sprite 30fps→12fps（呼吸/眨眼仍流畅）+ walkTimer 30fps→6fps；睡 28~55s 自然醒 / 被 hover·拖动·鼠标贴近立即惊醒恢复 30fps。实现：SwiftUI `EnvironmentValues.spriteFrameInterval`（ModeSprite.swift 定义，默认 1/30）把帧率传进 5 个桌面 sprite（Clawd/Cloud/Horse/Terminal/Fomo）内部 TimelineView；ClawdWalkController 加 `walkAccum`/`restThreshold`/`restingUntil` 疲劳状态机 + `enterRest`/`wakeUp`；ClawdWalkState 加 `lowPower`。配合 opencode EOF hotfix，桌宠待机从 ~40% 降到休息态个位数。
 
 ### 8. 彩蛋（P3 可选，做 1~2 个即可）
 - [ ] 节假日皮肤（圣诞雪花 / 春节红光）
@@ -299,6 +327,10 @@
 - **❌ 已撤销的错误方向**：曾尝试"DeepSeek 配 key 时强走 opencode/deepseek-v4-flash-free"——违反用户"强制用付费 key"的要求，已撤销。
 - **🎯 终极方案**：Phase 2 实现 ReasoningProxy（见上）。
 - **用户行为建议**：选非推理模型立刻享受 agent 能力 + 付费 Key；用推理模型接受偶尔无响应（重试一下）等 ReasoningProxy。
+
+- [x] **🔥 hotfix（2026-05-20）：opencode server stdout/stderr `readabilityHandler` EOF 空转烧满 CPU** —— 用户活动监视器抓到 Hermes 桌宠 **207% CPU**（累计 5h+ CPU 时间）。`sample 20170 5` 定位：两个 `com.apple.NSFileHandle.fd_monitoring` 线程满载，热点是 `OpenCodeServerManager.spawnAndWaitForReady` 的 `readabilityHandler`（OpenCodeServerManager.swift:264）里疯狂 `fstat`/`read`。**根因**：opencode `serve` 启动后会关闭继承来的 stdout/stderr 写端，读端进入 EOF —— 而 EOF 状态下 fd 永久"可读"，dispatch source 会无限高频回调 handler。原 handler 在 `availableData` 返回空 Data 时只 `return`、**从没把 `readabilityHandler` 置 nil 关掉 source** → stdout + stderr 两个 handler 各占满一个核 ≈ 200%。**修复**：两个 handler 都加 EOF 防护，检测到空数据立即 `handle.readabilityHandler = nil`。修复后该热点从 sample 栈顶彻底消失，整机降到 ~40%（剩余是桌宠在桌面走动时 walkTimer + sprite 30fps 渲染常驻开销，对应 Step 7「idle 时停动画节能」未做）。
+
+- [x] **🔥 同类 EOF 空转排查（2026-05-20）：把"readabilityHandler 不置 nil"的兄弟 bug 一次扫干净** —— 既然 opencode 那个空转修了，全项目 grep `readabilityHandler` 逐一核对。发现 **`HermesGatewayManager.spawnGateway`（长期 server，同性质致命）stdout `_ = handle.availableData` 完全无 EOF 检查、stderr `guard !data.isEmpty else return` 也没置 nil** —— 只要用户用 Hermes 模式且本地由 HermesPet spawn `hermes gateway run`，就会复现 opencode 那种 200% 空转。`ClaudeCodeClient` / `CodexClient` 的 stdout+stderr handler 同样 EOF 不置 nil，但它们是一次性子进程（EOF≈进程退出 + terminationHandler 兜底清理），空转窗口短、非致命，仍顺手补上消除窗口期空转。修复全部沿用已验证的「`data.isEmpty` → `handle.readabilityHandler = nil` + return」模式，共 3 文件 6 处。`OpenCodeClient`（legacy）本就有防护、`OpenClawGatewayManager`（daemon 由 launchd 管 + nullDevice，不读管道）无风险，均不动。编译通过。
 
 ### Phase 3（v1.3+ 探索）
 - [ ] **opencode ACP（Agent Client Protocol）替代 HTTP** —— Zed 等 IDE 用的标准化 agent 协议，比 HTTP SSE 更高级
@@ -594,7 +626,7 @@ PR 作者 simpledavid，3 个独立 commit 塞一个 PR（3011+ 行）。本地 
 
 ## [P3-暂不做] 低价值或高成本
 - [ ] 跨设备同步 / iCloud
-- [ ] 自动更新机制（Sparkle 集成）
+- [x] **自动更新机制（2026-05-20，自研全自动安装，绕开 Sparkle）** —— 不上 Sparkle（避免 Developer ID 强依赖），用自研路线把「下载并安装」做成名副其实的全自动：`UpdateChecker.downloadAndInstall` 下载 DMG 后调 `installFromDMG` —— `hdiutil attach` 挂载（`attachDMG` 后台 Task.detached，**修了原 attach 按空白切分会把含空格卷名 `/Volumes/Hermes 桌宠` 截断的 bug**，改成取 `/Volumes/` 到行尾）→ `findAppInVolume` 在卷里找 .app（优先同名）→ `writeInstallScript` 写一个「app 退出后接管」的 bash 脚本到 Caches（等父 PID 退出 → `ditto` 替换 /Applications 旧版 → `xattr -cr` 清 quarantine → `hdiutil detach` 卸载 + 删 DMG → `open` 重开 → 自删脚本）→ 弹一次「立即重启」确认 → `launchInstaller`（`nohup ... &` 脱离本进程，**刻意不注册 SubprocessRegistry** 否则 NSApp.terminate 会把它一起 SIGTERM）→ `NSApp.terminate`。用户全程只点 2 下，不碰访达。条件不满足（挂载失败 / 找不到 .app / 目标目录不可写 / 脚本写入失败）→ `fallbackToManual` 回退到原来「打开 Finder 手动拖拽」兜底。**固有限制**：GitHub release DMG 是 ad-hoc 签名，自动替换后 CDHash 变 → TCC 权限（截屏/Finder/语音）要重新授权一次，跟自动化无关、改不掉。**未端到端测试**：需 GitHub 上有更高版本 release + DMG 才能真正触发下载→替换→重启全流程，目前只编译验证 + 逻辑审查。
 - [ ] 暗 / 亮色模式深度审查
 - [ ] TestFlight / App Store 上架
 - [ ] 迷你浮动模式（类似歌词显示）
