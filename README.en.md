@@ -21,7 +21,7 @@
 
 ### 🌐 [Visit the project site · hermespet.cc →](https://hermespet.cc)
 
-Grab the macOS DMG · double-click to install · pick a provider, paste an API key — **no command-line tools required**
+Grab the macOS DMG · **double-click to install and open** (Apple-notarized) · pick a provider, paste an API key — **no command-line tools required**
 
 <sub>💡 Prefer the official signed DMG above (no build needed, double-click to run) · 🤖 AI agents: see [AGENTS.md](AGENTS.md)</sub>
 
@@ -31,15 +31,18 @@ Grab the macOS DMG · double-click to install · pick a provider, paste an API k
 
 > ## 🛡️ Official Download Source
 >
-> HermesPet is independently developed and open-sourced by **[Basion (@basionwang-bot)](https://github.com/basionwang-bot)**.
+> HermesPet is independently designed, developed and maintained by **[Basion (@basionwang-bot)](https://github.com/basionwang-bot)** since October 2024. Every commit and release is verifiable in this repo.
 >
-> **The only official download source**: [github.com/basionwang-bot/HermesPet/releases](https://github.com/basionwang-bot/HermesPet/releases)
+> ⚠️ Third parties have been re-uploading this project to cloud drives / secondary marketplaces and impersonating the original author. **DMGs from anywhere outside the official channel are NOT guaranteed safe or authentic** — they may be tampered with.
 >
-> Third parties have been re-uploading this project to personal cloud drives / secondary marketplaces / unrelated websites and impersonating the original author. **DMGs from anywhere outside the official channel are NOT guaranteed safe or authentic** — please download only from the GitHub Releases page above.
+> | Official channel | Link | Use |
+> |---|---|---|
+> | 🌐 Site | [hermespet.cc](https://hermespet.cc) | Product info, versions |
+> | 📦 Repo | [github.com/basionwang-bot/HermesPet](https://github.com/basionwang-bot/HermesPet) | Source, Issues |
+> | 📥 Download | [GitHub Releases](https://github.com/basionwang-bot/HermesPet/releases) | **The only safe source** |
+> | 📧 Contact | [basionwang@gmail.com](mailto:basionwang@gmail.com) | Partnerships, reports |
 >
-> After installation, check **Settings → About → Official Version Verification** inside the App for codesign verification (the authentic build shows the original author's Team ID `R34KL4X4D9`).
->
-> If you spot impersonation or unauthorized distribution, please report via [GitHub Issues](https://github.com/basionwang-bot/HermesPet/issues).
+> **Verify authenticity**: download from GitHub Releases → Settings → About → **Official Version Verification**; the authentic build shows the original author's Team ID **`R34KL4X4D9`**. If verification fails, delete it and re-download from the official source. Report impersonation via [GitHub Issues](https://github.com/basionwang-bot/HermesPet/issues).
 
 ---
 
@@ -72,7 +75,7 @@ HermesPet is an AI chat client + desktop companion that lives **right below your
 
 **The most important thing**: it works out of the box. No CLI tools required on your machine. Open it → pick an AI provider (DeepSeek / Zhipu / Kimi / MiniMax / OpenAI / OpenClaw / your own cloud gateway) → paste an API Key → start chatting. If you also have `claude` / `codex` CLIs installed, the app auto-detects them and unlocks advanced capabilities like "read/write local files / run commands / generate images".
 
-Tap the notch to summon the chat window, hold `⌘⇧V` to talk, drop files onto the little pet, watch fomo the nine-tailed fox wander around your desktop sniffing your files, see the Dynamic Island draw a Face ID-style checkmark ✓ when the AI is done — **desktop AI should feel alive**.
+Tap the notch to summon the chat window, hold `⌘⇧V` to talk, drop files onto the little pet, watch fomo the nine-tailed fox wander your desktop, see the Dynamic Island draw a Face ID-style checkmark ✓ when the AI is done — **desktop AI should feel alive**. The entire interface now ships in **English / 中文 with instant in-app switching**.
 
 > Swift 6 · SwiftUI · macOS 14+ · Pure native (no Electron / no Web view) · Apache-2.0 open source
 
@@ -86,13 +89,13 @@ Not switching — **truly in parallel**. Each conversation independently binds t
 
 | Engine | Best for | Setup |
 |---|---|---|
-| ☁️ **Online AI** | DeepSeek / Zhipu / Kimi / MiniMax / OpenAI — just pick a provider and paste a Key | DMG ships with bundled opencode runtime, **zero dependencies** |
-| ⚡ **OpenClaw** (new) | Gateway-style AI platform on your network | Install OpenClaw → HermesPet auto-detects + zero-config first connect |
-| ✦ **Hermes Gateway** | Connect to **any OpenAI-compatible HTTP endpoint** (self-hosted / cloud / vLLM / Ollama — all work) | Fill in baseURL + Key |
-| ⌨️ **Claude Code** | File edits / shell commands / deep coding | Install `claude` CLI (optional) |
-| ✨ **Codex** | Code + native image generation | Install `codex` CLI (optional) |
+| ☁️ **Online AI** ⭐ | DeepSeek / Zhipu / Kimi / MiniMax / OpenAI — just pick a provider and paste a Key | DMG ships with bundled opencode runtime, **zero dependencies** |
+| ⚡ **OpenClaw** | Gateway-style AI platform on your network | Install [OpenClaw](https://openclaw.ai) (one-line npm) → auto-detect + zero-config first connect |
+| ✦ **Hermes Gateway** | Any **OpenAI-compatible HTTP endpoint** (self-hosted / cloud / vLLM / Ollama) | Fill in baseURL + Key; 3 built-in presets, model auto-pulled from `/v1/models` |
+| ⌨️ **Claude Code** | File edits / shell commands / deep coding | Install [`claude` CLI](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview) (optional) |
+| ✨ **Codex** | Code + native image generation (multi-image vision) | Install [`codex` CLI](https://github.com/openai/codex) (optional) |
 
-**New users see only "Online AI" mode by default** (the simplest experience); the other four modes **auto-appear and unlock** when the matching tool is installed — no manual toggling required. Built for non-technical users from day one.
+**New users see only "Online AI" mode by default** (the simplest experience); the other four modes **auto-appear and unlock** when the matching tool is installed — no manual toggling required. **User intent always wins over auto-detection** — any enabled mode can be turned off again in settings.
 
 ### 🦊 5 pixel pets · one per AI mode
 
@@ -102,121 +105,72 @@ Every AI mode gets its own **pixel-art pet** living in your menu bar:
 |---|---|---|
 | 🦞 **Clawd** | Claude Code | Orange pixel crab, the OG — wanders the desktop sniffing your icons |
 | ☁️ **Cloud** | Online AI | Indigo sprite, puts on glasses when you drop an image to inspect |
-| 🦊 **fomo** | OpenClaw | Moonlight silver-white nine-tailed fox, with twitchy ears (new in v1.2.9) |
-| 🐴 **Pegasus** | Hermes | Golden flying horse with mane fluttering in trot rhythm (new in v1.2.7) |
+| 🦊 **fomo** | OpenClaw | Moonlight silver-white nine-tailed fox, with twitchy ears |
+| 🐴 **Pegasus** | Hermes | Golden flying horse, mane fluttering in trot rhythm |
 | ⌨️ **coco** | Codex | Iron Man-style pixel robot |
 
 Pets aren't just decoration:
 
 - 🍽 **Drop a file on the pet** → it chews and swallows → file auto-attaches to the current conversation
 - 👃 **Drag the pet onto a desktop icon** → it stops and sniffs → AI generates a ≤10-character quip about the filename
-- 🌀 **Cross-island teleport portal** (v1.2.7+): when the pet walks under the notch, a **pixel-art teleport portal** appears (octagonal frame + rotating star points + mode-color pulse) and the pet warps to the other side of the island
-- 🛡 Filenames pass through a local blocklist before reaching the AI (salary / contract / password / .env etc. are dropped)
+- 🌀 **Cross-island teleport portal**: when the pet walks under the notch, a **pixel-art teleport portal** appears (octagonal frame + rotating star points + mode-color pulse) and the pet warps to the other side
+- 🛡 Filenames pass through a local blocklist before reaching the AI (salary / contract / password / `.env` etc. are dropped)
 
-### 🏔 Dynamic Island = OS-level status display
+### 🏔 Dynamic Island = OS-level status display (incl. tool permission)
 
 The capsule below the notch is the **heart** of HermesPet:
 
 - **Left ear** sprite follows the current mode in real time (5 independent animations)
 - **Right ear** real-time tool status: rotating pulse → step count → file change count → **Face ID-style stroke checkmark ✓** on completion
-- **Hover → water-drop expansion** — the capsule flows down from the notch like a drop of water, showing mode color + model name + recent reply preview
-- 🛡 **Tool permission UI** (new in v1.2.4): when Claude / Codex wants to write a file, a black card pops out **flush below** the island with three buttons [Deny / Allow / Always Allow]. Visually seamless with the notch — feels like one piece
-- 💬 **AI response summary card** (new in v1.2.7): when the chat window is closed, a summary card pops below the island for 8s after the AI finishes — never miss a reply you weren't watching for
-- 🎙 **Live speech transcription**: when you hold `⌘⇧V`, a real-time transcript bar appears below the island
-- ❌ **Error state** turns the whole capsule amber + click to retry
-- 📸 **Screenshot shutter** 0.18s white flash + scale bounce
-- 🌊 **Background conversation breathing**: when one of your 8 conversations is running in the background, the corresponding spot on the capsule pulses softly
+- **Hover → water-drop expansion** — the capsule flows down from the notch, showing mode color + model name + recent reply preview
+- 🛡 **Real-time tool permission**: when Claude / Codex wants to **write a file or run a command** on your machine, a black card pops out **flush below** the island (visually seamless with the notch), showing the tool name + key arguments, with three buttons **[Deny / Allow / Always Allow]** and a feedback banner after you decide. When the chat window is open, the UI hops into the header strip and the pet strikes an "arms-up, help-me" pose — **HermesPet won't decide for you**
+- 💬 **AI response summary card**: when the chat window is closed, a summary card pops below the island for 8s after the AI finishes — never miss a reply you weren't watching for
+- 🎙 **Live speech transcription**: hold `⌘⇧V` and a real-time transcript bar appears below the island
+- ❌ **Error state** turns the whole capsule amber + click to retry · 📸 **Screenshot shutter** 0.18s white flash · 🌊 **Background conversations** pulse softly on their capsule spot
 
-### 🛡 Real-time tool permission confirmation (new in v1.2.4)
+### 🎙 Push-to-talk · 📎 Drag files · 💬 Multi-conversation
 
-When Claude Code / Codex wants to write a file or run a command on your machine, **a card pops out flush below the Dynamic Island**:
+**Push-to-talk from any app (`⌘⇧V`)**: an **Apple Intelligence-style colorful glow** appears at the screen edge + the right ear pulses a red microphone + a live transcript shows below the island. Speech uses **SFSpeechRecognizer** (macOS offline model); release to auto-send, with a "ding" when the AI finishes.
 
-- Shows the tool name + key arguments (which file? which command?)
-- Three buttons: **Deny / Allow (once) / Always Allow (whitelist)**
-- 0.8s feedback banner after decision (✓ Allowed / ✗ Denied / Added to whitelist)
-- When the chat window is open, the UI hops into the PetHeaderStrip with the pet sprite shown in a "arms-up help-me" pose
+**Drag files to AI · AI reads them on demand**: instead of stuffing the whole PDF into context, HermesPet appends the **absolute path** to the prompt and lets Claude / Codex **read just the pages they need** with their own Read / Bash tools — saving context, tokens, and time. Images support four input paths: **clipboard paste / drag / `⌘⇧J` screenshot / Codex direct generation**.
 
-**HermesPet won't decide for you.**
+**Multi-conversation · cross-AI shared context (signature feature)**: up to **8 conversations** at once (`⌘N` new / `⌘[` `⌘]` switch / `⌘1`~`⌘8` jump), each independently bound to a mode with zero cross-contamination; **switching a conversation's mode passes the entire history to the new model** — Claude can keep going from what Hermes was discussing, and vice versa.
 
-### 🎙 Push-to-talk from any app
+### 📋 AI task planner & dispatch · 📰 Cross-day memory + daily companion
 
-Hold `⌘⇧V` from any app:
+Let the AI **plan tasks and dispatch them to the right AI**: say "help me list what to do today" and the AI replies with a ```` ```tasks ```` YAML block that the client renders into **actionable cards**, each with 3 buttons — 📌 **Pin** to the desktop (checkbox strikes through, never disappears) / 🤖 **Let AI do it** (auto-creates a conversation in the recommended mode) / ✗ **Skip**. Not just a chat client — a **task dispatch hub**.
 
-- 🌈 An **Apple Intelligence-style colorful glow** appears at the screen edge (6-color AngularGradient, 4s rotation)
-- 🎤 Dynamic Island right ear pulses a red microphone
-- 📝 Live Chinese transcription appears below the island
-- 🔊 Speech recognition uses **SFSpeechRecognizer** (macOS offline model)
-- 📤 Release to auto-send; a "ding" sound plays when the AI finishes replying
+It also **quietly remembers you** (a big step in v1.2.13): it records what apps you used, files you dropped, and what you asked the AI (all in local SQLite, sensitive keywords stripped at the source), then gently checks in at the right moments:
 
-### 📎 Drag files to AI · AI reads them on demand
+- 🌅 **Daily briefing**: on morning launch the AI reviews yesterday, writes a Markdown recap, and **follows up proactively** ("You were tuning SwiftUI animation yesterday — want me to Pin the key solution to your desktop?")
+- 🎉 **Weekly review + milestones**: a recap every week, plus a little celebration at 30 / 100 / 365 days together
+- 🧠 **Cross-mode shared memory**: one **user-editable memory shared across all 5 AIs**, so any engine you switch to still "gets you" (edit / clear / disable under Settings → Privacy)
 
-Not stuffing the whole PDF into context — **the AI decides which pages to read**:
+> All intent data **stays on your machine** — one-click export to JSON / clear / blocklist an app.
 
-- Drop a PDF / txt / md / py / ts file
-- Claude / Codex mode: appends the **absolute path** to the prompt; AI uses its own Read / Bash tools to read on demand
-- The client only adds the file's parent directory to the `--add-dir` whitelist
-- Saves context, saves tokens, runs faster, and the AI can read just the relevant sections
+### 🌐 Bilingual UI (new in v1.2.13) · 🔄 Auto-update · 🛡 Anti-piracy
 
-Images support **four input paths**: clipboard paste / drag / `⌘⇧J` screenshot / Codex direct generation — multimodal in one breath.
+- 🌐 **Full bilingual interface**: switch between **中文 / English** in settings — **instant, no restart**; even the AI's chat replies **follow the language you pick**; new users choose their language on first launch
+- 🔄 **In-app auto-update**: 60s after launch + every 24h checks GitHub Release; new version → 🔵 indicator in the menu bar → "Download & Install" fetches the DMG, mounts it, and Finder prompts you (**no Sparkle, no telemetry**)
+- 🛡 **Official version verification**: Settings → About → one-click codesign check; authentic build shows Team ID `R34KL4X4D9` (defeats third-party repackaging)
+- 🚨 **One-click crash reporting**: scans local crash logs → copies the full log to clipboard + opens the GitHub Issue page (**zero backend, zero privacy concerns**)
 
-### 💬 Multi-conversation · cross-AI shared context (signature feature)
+### 🎨 And a pile of nice little details
 
-- Up to **8 conversations** at once (`⌘N` new / `⌘[` `⌘]` switch / `⌘1`~`⌘8` jump)
-- Each conversation **independently bound to a mode** — never any cross-contamination
-- **When you switch a conversation's mode, the entire history gets passed to the new model** — Claude can keep going from what Hermes was discussing, and vice versa
-- Red dot on the capsule when a background conversation finishes
-- Top 8 rounded TabBar shows mini sprite + index + smart title derived from the first message
-
-### 📋 AI task planner → dispatchable cards (a HermesPet exclusive)
-
-Let the AI **plan tasks and dispatch them to the right AI**:
-
-- You: "Help me list what to do today"
-- AI replies with a ```` ```tasks ```` YAML block (each item has title / desc / **recommended mode** / eta)
-- The client renders them as **actionable cards**, each with 3 buttons:
-  - 📌 **Pin** — convert into a task Pin on the top-right of the desktop, with ✅ checkbox that strikes-through (doesn't disappear)
-  - 🤖 **Let AI do it** — auto-create a new conversation in the recommended mode (Claude / Codex etc.) and send the task as the first message
-  - ✗ **Skip** — local dismiss
-
-Not just a chat client — a **task dispatch hub**.
-
-### 📰 Daily briefing (it's watching while you sleep)
-
-HermesPet quietly records what apps you used yesterday, what files you dropped, what you asked the AI (all data in local SQLite, sensitive keywords stripped at the source). In the morning, the AI reviews everything and gives you a Markdown briefing:
-
-> You spent 4h in Xcode yesterday, asked Hermes 7 Swift questions, 3 of them about SwiftUI animation. Looks like you're tuning animations — want me to Pin yesterday's best solution to the desktop?
-
-**All data stays on your machine.** Export to JSON / clear history / blocklist an app — one click each in settings.
-
-### 🎨 Obsessive attention to detail
-
-- **Markdown** full render (GFM tables + numbered lists auto-converted to clickable cards + code blocks with "copied" feedback)
-- **Pin desktop cards**: pin any AI reply to the desktop, single-click brings it back into chat
-- **Quick-ask window** (`⌘⇧Space` Spotlight-style) — ask a quick question without even opening the chat window
-- **Input bar strictly follows Apple HIG** (Capsule + 28pt round button + iMessage placeholder + auto-expanding multi-line)
-- **5 chat font sizes** (`⌘+` / `⌘-` / `⌘0` back to 100%)
-- **Window pinning toggle** — 📌 in chat header switches between "always on top" and "normal window"
-- **Optional Dock icon** — defaults to menubar-agent style; flip a toggle to show Dock + enter Cmd+Tab
-- **5 event sounds**, each independently togglable, supports custom mp3/wav drop-in
-
-### 🔄 Auto-update · authenticity verification · one-click feedback
-
-- 🔄 **In-app auto-update**: 60s after launch + every 24h checks GitHub Release. New version → 🔵 indicator in menu bar. Click "Download & Install" → background DMG fetch → auto `hdiutil` mount → Finder prompts you to drag into Applications (**no Sparkle, no telemetry**)
-- 🛡 **Official version verification** (new in v1.2.9): Settings → About → one-click codesign check; authentic build shows the original author's Team ID `R34KL4X4D9` (defeats third-party repackaging)
-- 🚨 **One-click crash reporting**: auto-scan local crash logs → copy full log to clipboard + open GitHub Issue page; you paste & submit (**zero backend, zero privacy concerns**)
+Full **Markdown** render (GFM tables + numbered lists → clickable cards + code blocks with "copied" feedback) · **Pin** any AI reply to the desktop · **Quick-ask** (`⌘⇧Space`, Spotlight-style) without opening the chat window · **input bar strictly follows Apple HIG** (Capsule + iMessage feel) · **5 chat font sizes** (`⌘+` / `⌘-` / `⌘0`) · **window pinning toggle** · **optional Dock icon** (defaults to menubar-agent style) · **5 event sounds** each togglable + custom audio drop-in.
 
 ---
 
 ## 🚀 Quick start
 
-### Option A: Download the DMG (recommended, no Xcode needed)
+### Option A: Download the DMG (recommended, no Xcode needed · 3 min to first chat)
 
-1. Go to the [Releases page](https://github.com/basionwang-bot/HermesPet/releases) and download the latest `HermesPet-x.x.dmg`
+1. Go to the [Releases page](https://github.com/basionwang-bot/HermesPet/releases) and download the latest DMG (**Apple Silicon / Intel** — pick the one for your chip; unsure? click  → About This Mac and check the "Chip" line)
 2. Double-click the DMG → drag "Hermes 桌宠" into Applications
-3. Right-click → Open (required once to bypass Gatekeeper, since it's ad-hoc signed)
-4. Click ✦ in the menu bar → gear ⚙️ → AI Backend → **pick a provider from the dropdown** (DeepSeek / Zhipu / Kimi / MiniMax / OpenAI) → paste API Key → start chatting
+3. **Open it from Launchpad / Spotlight with a double-click** — it's Apple-notarized, so Gatekeeper won't block it
+4. Click the menu-bar icon → gear ⚙️ → AI Backend → **pick a provider from the dropdown** → paste API Key → start chatting
 
-No API Key yet? Each provider in the settings panel has a **"Get Key" link** that goes directly to its official signup page.
+No API Key yet? Each provider in the settings panel has a **"Get Key" link** that goes straight to its official signup page.
 
 ### Option B: Build from source (developers)
 
@@ -228,8 +182,13 @@ cd HermesPet
 ./install.sh
 ```
 
-`install.sh` will build → install to `/Applications/Hermes 桌宠.app` → launch.
-An Apple Development certificate is recommended — TCC permissions stay stable that way.
+| Script | Purpose |
+|---|---|
+| `./build.sh` | Just build `.app` into `./HermesPet.app` |
+| `./install.sh` | Build + install to `/Applications` + launch (**use this daily**) |
+| `./make-dmg.sh` | Generate a distributable DMG (Developer ID signed + Apple-notarized, double-click opens) |
+
+> All three scripts sign with a **Developer ID certificate + Hardened Runtime** (when a certificate is present), keeping TCC permissions stable — "what you install locally == what users download".
 
 ### Advanced: unlock more AI engines (all optional)
 
@@ -242,39 +201,24 @@ All four advanced engines are **optional**. Installing them unlocks stronger cap
 | **Claude Code** | [Official installation guide](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview) | File read/write + shell commands + deep coding |
 | **OpenAI Codex** | [Official repository](https://github.com/openai/codex) | Image generation + multi-image vision + code |
 
-After installing, **restart HermesPet and the path is auto-detected** (on launch it runs `zsh -lic 'command -v ...'`, which reads your real `PATH` as loaded by `~/.zshrc`). If detection fails, open the settings panel and click "Re-detect" on the corresponding mode's card.
+After installing, **restart HermesPet and the path is auto-detected** (on launch it runs `zsh -lic 'command -v ...'`, reading your real `PATH` from `~/.zshrc`). If detection fails, open settings and click "Re-detect" on the corresponding mode's card.
 
 ### First-time permissions
 
 | Permission | Trigger | Used for |
 |---|---|---|
 | Screen Recording | First `⌘⇧J` screenshot | ScreenCaptureKit |
-| Microphone | First `⌘⇧V` | Recording |
-| Speech Recognition | First `⌘⇧V` | SFSpeechRecognizer |
+| Microphone + Speech Recognition | First `⌘⇧V` | Recording + SFSpeechRecognizer |
 | Accessibility | Quick Ask reads selected text | AX API |
 | Finder Automation | Enable "Clawd desktop patrol" | osascript reads desktop icons |
 
-After granting any permission, it's recommended to **fully quit and reopen** (menu bar ✦ → Quit → reopen) so the new process picks up the permission.
+After granting any permission, **fully quit and reopen** (menu-bar icon → Quit → reopen) so the new process picks it up.
 
 ---
 
-## 🎯 5 AI Engines · Deep dive
+## 🎯 Online AI: 6 providers out of the box
 
-| Mode | Icon | Best for | Setup |
-|---|---|---|---|
-| **Online AI** ⭐ | ☁ | Chat / translation / writing / vision — **zero dependencies, just works** | Pick a provider + paste API Key (DeepSeek / Zhipu / Kimi / MiniMax / OpenAI presets built in; DMG ships with bundled opencode runtime that handles SSE / reasoning filtering / tool calling) |
-| **OpenClaw** ⚡ | ⚡ | Gateway-style AI platform on your network — new in v1.2.9 | Install [OpenClaw](https://openclaw.ai) (one-line npm) → HermesPet **auto-detects daemon + auto-enables chatCompletions endpoint + zero-config first connect** |
-| **Hermes Gateway** | ✦ | Connect to **any OpenAI-compatible HTTP endpoint** (self-hosted / cloud / vLLM / Ollama / internal company LLM platform — all work) | Fill in baseURL + Key. **New in v1.2.x: 3 preset levels** (local / self-hosted / custom); model Picker auto-pulls from `/v1/models` |
-| **Claude Code** | ⌨ | File edits / shell commands / deep coding / full tool calling | Install [`claude` CLI](https://docs.claude.com/en/docs/agents-and-tools/claude-code/overview) (optional) |
-| **Codex** | ✨ | Image generation + code (native Codex CLI with multi-image support) | Install [OpenAI Codex CLI](https://github.com/openai/codex) + `codex login` (optional) |
-
-Open chat → ⚙️ → AI Backend → fill in config. **All 5 modes' configs are stored fully independently**, and **new conversations inherit "the last mode you used"**.
-
-🆕 **v1.2.9 hidden-by-default + auto-detection**: new users see only "Online AI" mode (cleanest); the other 4 modes **auto-detect their tools and become enableable** when you install them. Already-enabled modes can be toggled off in settings — **user intent always wins over auto-detection**.
-
-### Online AI built-in provider presets
-
-Zero-config switching between six mainstream LLM providers, each with **3-level response preference** (fast / balanced / deep) auto-mapped to the right model:
+"Online AI" is the default, zero-dependency mode for new users. It ships with presets for 6 mainstream LLMs, each with a **3-level response preference** (fast / balanced / deep) auto-mapped to the right model; the bundled opencode runtime handles SSE / reasoning filtering / tool calling:
 
 | Provider | Default model | Sign up |
 |---|---|---|
@@ -285,13 +229,13 @@ Zero-config switching between six mainstream LLM providers, each with **3-level 
 | OpenAI | gpt-4o-mini | [platform.openai.com](https://platform.openai.com) |
 | Custom | You decide | Any OpenAI-compatible endpoint |
 
-Each provider's **API Key is stored separately** (no cross-contamination across providers); switching providers auto-fills the matching baseURL. **5 minutes from install to first chat.**
+Each provider's **API Key is stored separately** (no cross-contamination); switching auto-fills the matching baseURL. **All 5 modes' configs are stored fully independently**, new conversations inherit "the last mode you used", and you're **5 minutes from install to first chat**.
 
 ---
 
 ## ⌨️ Keyboard shortcuts
 
-**Global hotkeys** (registered via Carbon Event Manager, trigger from any app):
+**Global hotkeys** (trigger from any app):
 
 | Combo | Function |
 |---|---|
@@ -301,61 +245,7 @@ Each provider's **API Key is stored separately** (no cross-contamination across 
 | `⌘⇧P` | Pin the latest AI reply of the current conversation to the desktop |
 | `⌘⇧Space` | Spotlight-style quick-ask floating window |
 
-**In-window shortcuts** (active when the chat window is focused):
-
-| Combo | Function |
-|---|---|
-| `⌘N` | New conversation |
-| `⌘[` / `⌘]` | Switch to previous / next conversation |
-| `⌘1` ~ `⌘8` | Jump directly to that conversation |
-| `⌘⌫` | Close current conversation |
-
----
-
-## 🧰 Build scripts
-
-| Script | Purpose |
-|---|---|
-| `./build.sh` | Just build `.app` into `./HermesPet.app` (auto-picks certificate) |
-| `./install.sh` | Build + install to `/Applications` + launch (**use this daily**) |
-| `./make-dmg.sh` | Generate a distributable DMG (ad-hoc signed, recipient needs right-click → Open) |
-
----
-
-## 📁 Project structure
-
-```
-Sources/  (~60 .swift files, organized by responsibility)
-├── HermesPetApp.swift             # AppDelegate, coordinates controllers / global hotkeys
-├── ChatViewModel.swift            # Multi-conversation state + streaming + persistence
-├── ChatView.swift                 # Main chat UI (header / messages / TabBar)
-├── DynamicIslandController.swift  # Notch capsule (decision #1: never setFrame)
-├── PermissionWindowController.swift # Tool permission UI (flush below island)
-├── ResponseSummaryWindowController.swift # AI reply summary card (when chat is closed)
-├── PetHeaderStrip.swift           # 28pt pet status strip atop the chat window
-├── ClawdWalkOverlay.swift         # Desktop pixel pet walk + sniff + teleport
-├── TeleportPortal.swift           # Cross-island pixel-art teleport animation
-├── FomoSprite.swift               # 🦊 OpenClaw nine-tailed fox sprite
-├── ModeSprite.swift               # Clawd / Cloud / Pegasus / coco sprites
-├── PinCardOverlay.swift           # Desktop Pin cards
-├── QuickAskWindow.swift           # Spotlight-style quick-ask window
-├── IntelligenceOverlay.swift      # AI glow during push-to-talk
-├── VoiceInputController.swift     # Recording + SFSpeechRecognizer (Chinese)
-├── VoiceTranscriptOverlay.swift   # Live transcript bar below the island
-├── ScreenCapture.swift            # ScreenCaptureKit screenshotting
-├── APIClient.swift                # OpenAI-compatible HTTP streaming (shared by Hermes / Online AI / OpenClaw)
-├── OpenClawGatewayManager.swift   # OpenClaw daemon auto-detect + zero-config first connect
-├── OpenCodeServerManager.swift    # Bundled opencode runtime manager
-├── ClaudeCodeClient.swift         # spawn claude -p
-├── CodexClient.swift              # spawn codex exec + image capture
-├── MarkdownRenderer.swift         # GFM tables + task planner cards + choice cards
-├── ActivityRecorder.swift         # Local activity sampling (briefing data source)
-├── MorningBriefingService.swift   # Daily briefing generator
-├── CodeSignVerifier.swift         # Official version verification (v1.2.9 anti-piracy)
-└── ...
-```
-
-Technical decision notes (gotchas / Swift 6 isolation / macOS 26 layout cycles) live in [CLAUDE.md](./CLAUDE.md). Roadmap in [TODO.md](./TODO.md).
+**In-window** (when the chat window is focused): `⌘N` new conversation · `⌘[` / `⌘]` previous/next conversation · `⌘1`~`⌘8` jump to that conversation · `⌘⌫` close current conversation · `⌘+` / `⌘-` / `⌘0` font size.
 
 ---
 
@@ -366,39 +256,27 @@ Technical decision notes (gotchas / Swift 6 isolation / macOS 26 layout cycles) 
 | `~/.hermespet/conversations.json` | All conversation history (without image Data) |
 | `~/.hermespet/images/` | User-attached / Codex-generated image persistence |
 | `~/.hermespet/pins.json` | Desktop Pin cards |
-| `~/.hermespet/activity.sqlite` | Activity sampling + user intent records (briefing data source) |
+| `~/.hermespet/activity.sqlite` | Activity sampling + user intent records (briefing / memory source) |
 | `~/Library/Caches/HermesPet/` | Screenshot temp area + pet temp cache |
-| `~/Library/Application Support/HermesPet/opencode-global/` | Bundled opencode runtime working dir (Online AI mode) |
 
 **Privacy boundary** (HermesPet makes "no data collection" a hard constraint):
 
-- 🛡 **Zero telemetry**: the project itself does NOT phone home to any backend. All AI calls go to backends you configure yourself (your API Key / your self-hosted Gateway / your local CLI)
+- 🛡 **Zero telemetry**: the project itself does NOT phone home. All AI calls go to backends you configure yourself (your API Key / your self-hosted Gateway / your local CLI)
 - 🛡 **Desktop patrol blocklist**: filenames pass through a local blocklist before reaching the AI (salary / contract / password / `.env` / `credentials` keywords are dropped entirely)
-- 🛡 **Activity sampling stays local**: all daily briefing data lives in a local SQLite database and **never leaves your machine**; one-click export to JSON / clear history / blocklist an app in settings
-- 🛡 **Official version verification**: Settings → About → one-click codesign check (Team ID `R34KL4X4D9`) to defeat third-party repackaging
-- 🛡 **Crash logs**: HermesPet scans local crash files → copies the full log to clipboard → **you** manually paste into GitHub Issue. HermesPet does not auto-upload anything.
+- 🛡 **Activity sampling + shared memory stay local**: all briefing / memory data lives in local SQLite and **never leaves your machine**; one-click export to JSON / clear / blocklist an app / edit or disable shared memory
+- 🛡 **Crash logs**: HermesPet scans local crash files → copies the full log to clipboard → **you** manually paste into a GitHub Issue. It never auto-uploads anything.
+
+> Technical decision notes (gotchas / Swift 6 isolation / macOS layout cycles) live in [CLAUDE.md](./CLAUDE.md); roadmap in [TODO.md](./TODO.md). ~60 Swift files, pure native, no Electron.
 
 ---
 
-## 🤝 Come hang out
+## 🤝 Come hang out · buy me a coffee
 
 HermesPet is currently a one-person open-source project. Every issue / PR / star genuinely makes my day.
 
-**Found a bug / something feels off / want a feature**: just open an [Issue](https://github.com/basionwang-bot/HermesPet/issues). Include your machine model + macOS version + repro steps and I'll get to it soon.
-
-**Want to send a PR**: open an issue first to chat about the direction — saves both of us time if our visions don't line up. No strict style guide, just match the surrounding files.
-
-**Like the project**: a ⭐ or sharing it with someone who might like it goes a long way — getting this in front of more people is the best reward this project could ask for.
-
----
-
-## ☕ Buy me a coffee
-
-HermesPet is an independent side project I build in my spare time. If it's been useful to you, the most meaningful ways to support it:
-
-- Give it a ⭐ so more people can find it
-- Open an [Issue](https://github.com/basionwang-bot/HermesPet/issues) to share feedback, bugs, or feature requests
-- Share it with friends who might find it useful
+- 🐞 **Found a bug / something feels off / want a feature**: open an [Issue](https://github.com/basionwang-bot/HermesPet/issues) with your machine model + macOS version + repro steps, and I'll get to it soon
+- 🛠 **Want to send a PR**: open an issue first to chat about direction — saves us both time. No strict style guide, just match the surrounding files
+- ⭐ **Like the project**: a Star or a share with someone who'd like it goes a long way — getting this in front of more people is the best reward this project could ask for
 
 > 💡 Want to use HermesPet inside your company, or customize it as your branded macOS AI tool? Email me: [basionwang@gmail.com](mailto:basionwang@gmail.com)
 
@@ -406,11 +284,11 @@ HermesPet is an independent side project I build in my spare time. If it's been 
 
 ## 📄 License
 
-[Apache License 2.0](./LICENSE)
+[Apache License 2.0](./LICENSE) — when using this project's code you **must** keep the original copyright and [NOTICE](./NOTICE) attribution, clearly mark your modifications, and **must not use the HermesPet name / trademark / logo to imply association with or endorsement by the original project**.
 
----
+See [NOTICE](./NOTICE) · [Brand Guidelines](./BRAND_GUIDELINES.md) · [Contributing](./CONTRIBUTING.md)
 
-## ⭐ Star History
+### ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=basionwang-bot/HermesPet&type=Date)](https://star-history.com/#basionwang-bot/HermesPet&Date)
 
@@ -421,5 +299,7 @@ HermesPet is an independent side project I build in my spare time. If it's been 
 Made with ✦, coffee, and stubborn love on a MacBook
 
 *For everyone who's ever wished their AI felt a little more alive.*
+
+© 2024–2026 [Basion Wang](https://github.com/basionwang-bot). HermesPet is an original work; unauthorized copying, modification or distribution will be pursued.
 
 </div>
