@@ -136,6 +136,20 @@ The capsule below the notch is the **heart** of HermesPet:
 
 **Multi-conversation · cross-AI shared context (signature feature)**: up to **8 conversations** at once (`⌘N` new / `⌘[` `⌘]` switch / `⌘1`~`⌘8` jump), each independently bound to a mode with zero cross-contamination; **switching a conversation's mode passes the entire history to the new model** — Claude can keep going from what Hermes was discussing, and vice versa.
 
+### 🌌 Knowledge Nebula · a universe of conversations you never lose (NEW in v1.3.0 · the killer feature)
+
+Other AI clients hand you a sidebar list that only grows **longer and more exhausting**. HermesPet gives you a **living, breathing galaxy**.
+
+Hit **`⌘⇧G`** and a full-screen Knowledge Nebula floats up from your desktop — **every conversation is a glowing star**, brighter and bigger the deeper you went; similar topics get **pulled into clusters by keyword gravity** (fitness, travel, code, that bug you fought for three days…), each cluster labeled at its core so you see at a glance *what you've actually been talking about with your AI*. Sweep over a star and **only its links light up** while the rest fade into deep space; click it to **jump straight back into that conversation**. Liquid-glass depth, mode-color glow, a bloom-open entrance — this isn't a chat list, it's **the first time the things you and your AI thought through together are drawn as a map**.
+
+Underneath, three hard features ship together:
+
+- **🗂 Conversations never lost**: every chat lands in a **permanent local store** (`history.sqlite`, separate from the working set, never auto-deleted). You used to lose the oldest once 8 chats were open — now they're **all there**, browsable and keyword-searchable (local tokenizer; *"that one where we debugged the crash"* still finds it).
+- **🧠 It learns you over time**: long-term cross-conversation memory **auto-revises while you're idle**, so it still understands you no matter which engine you switch to — no re-explaining your context every time.
+- **⭐ Star to pin + 🗄 auto-archive**: star an important chat and it turns **bigger, gold-rimmed, never buried** in the nebula; chats untouched for 90+ days **quietly sink into the archive** (not deleted — recall anytime). The more data you accrue, the cleaner it stays — **store ten thousand, see only what matters**.
+
+> Fully local, zero upload. Those "revisit / star / salience" signals make HermesPet understand your rhythm the more you use it — and the final say is always yours.
+
 ### 📋 AI task planner & dispatch · 📰 Cross-day memory + daily companion
 
 Let the AI **plan tasks and dispatch them to the right AI**: say "help me list what to do today" and the AI replies with a ```` ```tasks ```` YAML block that the client renders into **actionable cards**, each with 3 buttons — 📌 **Pin** to the desktop (checkbox strikes through, never disappears) / 🤖 **Let AI do it** (auto-creates a conversation in the recommended mode) / ✗ **Skip**. Not just a chat client — a **task dispatch hub**.
