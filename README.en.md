@@ -187,6 +187,20 @@ Full **Markdown** render (GFM tables + numbered lists → clickable cards + code
 
 ---
 
+<div align="center">
+
+## 💬 Add the author on WeChat · let's connect
+
+Building this solo isn't easy — feel free to scan and add me for bug reports, feature ideas, collaboration, or just to chat (note **HermesPet** so I approve faster) 👇
+
+<img src="docs/wechat-qr.jpg" alt="Author's WeChat QR · Miao Qingshan (Hangzhou)" width="240" />
+
+<sub>Miao Qingshan · Hangzhou, China · scan to add, note "HermesPet"</sub>
+
+</div>
+
+---
+
 ## 🚀 Quick start
 
 ### Option A: Download the DMG (recommended, no Xcode needed · 3 min to first chat)
